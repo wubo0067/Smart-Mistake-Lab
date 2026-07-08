@@ -3,3 +3,26 @@ dist/
 .env
 .env.local
 *.local
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+
+# Python virtual environment
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# IDE
+.vscode/
+.idea/
