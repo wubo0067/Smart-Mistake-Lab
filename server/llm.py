@@ -1,4 +1,4 @@
-"""
+""",
 Smart Mistake Lab - LLM 交互模块
 负责 Prompt 管理、AI API 调用、响应解析。
 """
@@ -491,8 +491,11 @@ ENCOURAGEMENT_PROMPT = """你是一名学习督促助手。
 
 要求：
 - 每句不超过 20 个汉字
+- 语气幽默、自然、轻松，不要像在上课
 - 鼓励但不说教，不要用"加油""你可以的"这类空话
-- 结合题目信息和超时情况，让建议具体
+- 不要围绕具体题目内容展开，不要复述题干、学科、标签等信息
+- 可以轻微调侃拖延练习的状态，但不要冒犯
+- 更像一句短促、顺口的提醒，而不是分析建议
 - 不要输出序号或多余解释
 - 必须为每条题目返回对应的 file_path，且不要遗漏任何一条
 - 只输出 JSON 数组，格式：[{"file_path": "...", "message": "..."}]
@@ -594,15 +597,12 @@ async def generate_encouragements(items: list[dict]) -> dict:
         logger.warning("[Encourage] AI 未配置，跳过鼓励语生成")
         return {}
 
-    # 构建题目标题摘要
+    # 构建尽量泛化的上下文，避免鼓励语过度依赖具体题目内容
     lines = []
     for it in items:
-        title = it.get("title", "未命名") or "未命名"
-        subject = it.get("subject", "") or ""
         file_path = it.get("file_path", "") or ""
-        tags_str = ", ".join((it.get("tags", []) or [])[:3])
         days = round((it.get("inactive_hours", 0) or 0) / 24, 1)
-        lines.append(f"- file_path: {file_path}\n  题目：{title}（{subject}）\n  标签：{tags_str}\n  已 {days} 天未练习")
+        lines.append(f"- file_path: {file_path}\n  已 {days} 天未练习")
     items_text = "\n".join(lines)
     prompt = ENCOURAGEMENT_PROMPT + "\n\n" + items_text + "\n\n请严格输出 JSON 数组，不要输出任何解释："
 
