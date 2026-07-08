@@ -15,22 +15,36 @@ NC='\033[0m' # No Color
 
 # 用法
 usage() {
-    echo "用法: $0 [--no-frontend] [--no-backend]"
+    echo "用法: $0 [--ip IP] [--no-frontend] [--no-backend]"
+    echo "  --ip IP          指定前后端绑定和显示的 IP"
     echo "  --no-frontend    仅启动后端"
     echo "  --no-backend     仅启动前端"
     exit 1
 }
 
+HOST_IP=""
 NO_FRONTEND=false
 NO_BACKEND=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --ip)
+            [[ $# -lt 2 ]] && echo -e "${RED}--ip 参数缺少值${NC}" && usage
+            HOST_IP="$2"
+            shift 2
+            ;;
         --no-frontend) NO_FRONTEND=true; shift ;;
         --no-backend)  NO_BACKEND=true;  shift ;;
         -h|--help)     usage ;;
         *) echo -e "${RED}未知参数: $1${NC}"; usage ;;
     esac
 done
+
+BACKEND_HOST="127.0.0.1"
+FRONTEND_HOST="localhost"
+if [ -n "$HOST_IP" ]; then
+    BACKEND_HOST="$HOST_IP"
+    FRONTEND_HOST="$HOST_IP"
+fi
 
 echo -e "${CYAN}"
 echo "╔══════════════════════════════════════════╗"
@@ -73,17 +87,17 @@ cd "$ROOT_DIR"
 # ─── 启动后端 ────────────────────────────────────
 if [ "$NO_BACKEND" = false ]; then
     echo -e "${GREEN}▸ [1/2] 启动后端服务 (FastAPI) ...${NC}"
-    echo -e "${DKGRAY}  ▸ http://127.0.0.1:8765${NC}"
+    echo -e "${DKGRAY}  ▸ http://$BACKEND_HOST:8765${NC}"
 
     # 新终端启动后端 (优先 gnome-terminal, 回退 xterm)
     if command -v gnome-terminal &>/dev/null; then
-        gnome-terminal -- bash -c "cd '$ROOT_DIR/server' && uv run python server.py; exec bash" 2>/dev/null
+        gnome-terminal -- bash -c "cd '$ROOT_DIR/server' && uv run python server.py --host '$BACKEND_HOST'; exec bash" 2>/dev/null
     elif command -v xterm &>/dev/null; then
-        xterm -T "Smart Mistake Lab - Backend" -e "cd '$ROOT_DIR/server' && uv run python server.py" &
+        xterm -T "Smart Mistake Lab - Backend" -e "cd '$ROOT_DIR/server' && uv run python server.py --host '$BACKEND_HOST'" &
     else
         # 无图形终端时在当前后台运行
         cd "$ROOT_DIR/server"
-        uv run python server.py &
+        uv run python server.py --host "$BACKEND_HOST" &
         BACKEND_PID=$!
         cd "$ROOT_DIR"
         echo -e "${YELLOW}  ⚠ 未检测到图形终端，后端已在后台运行 (PID: $BACKEND_PID)${NC}"
@@ -99,7 +113,7 @@ if [ "$NO_FRONTEND" = false ]; then
     echo ""
     echo -e "${WHITE}  打开浏览器访问:${NC}"
     echo -e "${CYAN}  ┌─────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}  │  http://localhost:5173               │${NC}"
+    echo -e "${CYAN}  │  http://$FRONTEND_HOST:5173               │${NC}"
     echo -e "${CYAN}  └─────────────────────────────────────┘${NC}"
     echo ""
     echo -e "${YELLOW}  按 Ctrl+C 可停止前端服务${NC}"
@@ -107,5 +121,9 @@ if [ "$NO_FRONTEND" = false ]; then
     echo ""
 
     cd "$ROOT_DIR"
-    npm run dev
+    if [ -n "$HOST_IP" ]; then
+        SMART_MISTAKE_LAB_HOST="$HOST_IP" npm run dev -- --host "$HOST_IP"
+    else
+        npm run dev
+    fi
 fi
