@@ -96,45 +96,84 @@
 - Python >= 3.10
 - [uv](https://docs.astral.sh/uv/)（Python 包管理器）
 
-### 1. 安装前端依赖
+### 1. 安装依赖
 
 ```bash
+# 在 Smart-Mistake-Lab 目录下安装前端依赖
 cd Smart-Mistake-Lab
 npm install
-```
 
-请确保当前目录就是 Smart-Mistake-Lab；如果在工作区根目录直接执行 npm run dev，npm 会因为找不到 package.json 启动失败。
-
-### 2. 安装后端依赖
-
-```bash
+# 在 server 目录下安装后端依赖
 cd server
 uv sync
 ```
 
-此命令会自动创建 `.venv` 虚拟环境并根据 `pyproject.toml` 安装所有依赖。
+请确保在执行 `npm run dev` 时当前目录是 Smart-Mistake-Lab（包含 `package.json` 的目录），否则 npm 会启动失败。
 
-### 3. 启动后端服务
+### 2. 一键启动
 
-```bash
-# 在 Smart-Mistake-Lab/server 目录下
-cd server
-uv run python server.py
+项目提供了一键启动脚本，可同时启动后端（FastAPI）和前端（Vite）服务：
+
+**Windows PowerShell：**
+```powershell
+.\start.ps1
 ```
 
-`uv run` 会自动激活虚拟环境并启动服务，后端默认运行在 `http://127.0.0.1:8765`。
+**Windows 命令提示符：**
+```cmd
+start.bat
+```
 
-### 4. 启动前端开发服务器
+**Linux / macOS：**
+```bash
+./start.sh
+```
+
+脚本会自动检测缺失的依赖并安装，然后依次启动后端和前端服务。
+
+### 3. 指定 IP 地址（局域网访问）
+
+如果需要在局域网其他设备上访问，可指定本机 IP 地址：
+
+```powershell
+.\start.ps1 --ip 192.168.1.10
+```
+
+```cmd
+start.bat --ip 192.168.1.10
+```
 
 ```bash
-# 在 Smart-Mistake-Lab 目录下（新开一个终端）
+./start.sh --ip 192.168.1.10
+```
+
+指定 IP 后，后端绑定到该 IP 的 `:8765` 端口，前端绑定到该 IP 的 `:5173` 端口，其他设备可通过 `http://192.168.1.10:5173` 访问。
+
+> ⚠️ 注意：`--ip` 的值必须是**本机网卡实际拥有的 IP 地址**（可通过 `ipconfig` 或 `ifconfig` 查看），不能是网关地址或其他不可达地址，否则会报 `EADDRNOTAVAIL` 错误。
+
+### 其他选项
+
+| 参数 | 说明 |
+|------|------|
+| `--ip <地址>` | 指定前后端绑定的 IP 地址 |
+| `--no-frontend` | 仅启动后端服务 |
+| `--no-backend` | 仅启动前端服务 |
+
+### 手动启动（分步）
+
+如果需要分别启动前后端进行调试：
+
+```bash
+# 终端 1：启动后端
+cd server
+uv run python server.py
+
+# 终端 2：启动前端（新开一个终端）
 cd Smart-Mistake-Lab
 npm run dev
 ```
 
-前端默认运行在 `http://localhost:5173`。
-
-Vite 开发服务器会自动将 `/api` 请求代理到后端 `127.0.0.1:8765`。
+后端默认运行在 `http://127.0.0.1:8765`，前端默认运行在 `http://localhost:5173`。Vite 开发服务器会自动将 `/api` 请求代理到后端。
 
 ### 构建生产版本
 
@@ -190,7 +229,7 @@ AI_MODEL=your-vision-model
 AI_API_KEY=sk-your-api-key-here
 ```
 
-> API Key 仅存于服务端，不会暴露到浏览器端。修改后需重启后端服务 `uv run python server.py`。
+> API Key 仅存于服务端，不会暴露到浏览器端。修改后需重启后端服务（重新运行启动脚本，或手动执行 `uv run python server.py`）。
 
 说明：
 
@@ -218,6 +257,9 @@ Smart-Mistake-Lab/
 ├── vite.config.js              # Vite 配置（含 API 代理）
 ├── .env                        # 环境变量（AI_API_URL / AI_MODEL / AI_API_KEY）
 ├── mistake-notebook.jsx        # 主应用组件（含所有页面逻辑与样式）
+├── start.ps1                   # Windows PowerShell 一键启动脚本
+├── start.bat                   # Windows CMD 一键启动脚本
+├── start.sh                    # Linux / macOS 一键启动脚本
 ├── src/
 │   ├── main.jsx                # React 挂载入口
 │   └── App.jsx                 # 组件导出
@@ -266,8 +308,8 @@ Smart-Mistake-Lab/
 ### 初次使用
 
 1. 按学科组织图片目录（参见"图片目录配置"部分），将错题截图放入对应子目录
-2. 启动后端（`uv run python server.py`）和前端（`npm run dev`）
-3. 打开浏览器访问 `http://127.0.0.1:5173` 或 `http://localhost:5173`
+2. 运行一键启动脚本（如 `start.ps1`），或分别手动启动后端和前端
+3. 打开浏览器访问 `http://127.0.0.1:5173` 或 `http://localhost:5173`（指定 `--ip` 时访问对应的地址）
 4. 进入 **配置** 页面，设置图片存放目录路径并保存
 5. 确保 `.env` 文件中已配置 `AI_API_URL`、`AI_MODEL`、`AI_API_KEY`
 6. 切换到 **扫描** 页面，点击 **刷新扫描**，图片会按学科分组展示
