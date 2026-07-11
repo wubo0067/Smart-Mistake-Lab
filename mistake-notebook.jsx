@@ -836,7 +836,8 @@ const CSS = `
 }
 
 .mnb .focus-reminder-msg {
-  color: #991b1b;
+  color: #15803d;
+  font-weight: 600;
   font-style: italic;
 }
 .mnb .focus-reminder-msg.loading {

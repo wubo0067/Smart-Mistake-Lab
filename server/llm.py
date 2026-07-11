@@ -1,5 +1,5 @@
 """
-Smart Mistake Lab - LLM 交互模块
+SSmart Mistake Lab - LLM 交互模块
 负责 Prompt 管理、AI API 调用、响应解析。
 """
 
@@ -69,8 +69,8 @@ MATH_KNOWLEDGE_POINTS = [
     "相似三角形，反 A 字模型",
     "相似三角形，8 字模型",
     "相似三角形，反 8 字模型",
-    "相似三角形，射影定理",
     "相似三角形，角平分线模型",
+    "相似三角形，射影定理",
     "孤单直角做三垂直构造三角形相似",
     "相似三角形，线段等积式",
     "相似三角形对应线段（高/中线/角平分线）的比等于相似比",
@@ -485,20 +485,17 @@ async def analyze_image(
 
 # ============== 鼓励语生成 ==============
 
-ENCOURAGEMENT_PROMPT = """你是一名学习督促助手。
-
-以下是用户错题本中多道超时未练习的题目信息，请为每道题生成一句 20 字以内的鼓励语。
+ENCOURAGEMENT_SINGLE_PROMPT = """你是一名学习督促助手。请为下面这道超时未练习的错题生成一句鼓励语。
 
 要求：
-- 每句不超过 20 个汉字
+- 不超过 18 个汉字
 - 语气幽默、自然、轻松，不要像在上课
 - 鼓励但不说教，不要用"加油""你可以的"这类空话
 - 不要围绕具体题目内容展开，不要复述题干、学科、标签等信息
 - 可以轻微调侃拖延练习的状态，但不要冒犯
 - 更像一句短促、顺口的提醒，而不是分析建议
-- 不要输出序号或多余解释
-- 必须为每条题目返回对应的 file_path，且不要遗漏任何一条
-- 只输出 JSON 数组，格式：[{"file_path": "...", "message": "..."}]
+- 只输出 JSON 对象，不要输出任何其他文字，不要用 markdown 代码块包裹
+- 格式：{"message": "..."}
 """
 
 
@@ -573,40 +570,17 @@ def load_json_relaxed(raw_text: str) -> dict:
     raise json.JSONDecodeError('Expecting JSON object', cleaned, 0)
 
 
-async def generate_encouragements(items: list[dict]) -> dict:
-    """
-    批量生成超时题目的鼓励语。
-    items: [{title, subject, tags, inactive_hours, is_focus_overdue, file_path}, ...]
-    返回：{file_path: message, ...}
-    """
-    from_env = AiConfig.from_env()
-    cfg = {
-        "api_url": os.environ.get("AI_API_URL") or from_env.api_url,
-        "model": os.environ.get("AI_MODEL") or from_env.model,
-        "api_key": os.environ.get("AI_API_KEY") or from_env.api_key,
-    }
-    ai_config = AiConfig(
-        api_url=cfg["api_url"],
-        model=cfg["model"],
-        api_key=cfg["api_key"],
-        timeout=120.0,
-        max_tokens=1024,
-    )
-    api_url = normalize_api_url(ai_config.api_url)
-    if not api_url or not ai_config.model.strip():
-        logger.warning("[Encourage] AI 未配置，跳过鼓励语生成")
-        return {}
+async def _generate_single_encouragement(
+    item: dict,
+    ai_config: AiConfig,
+    api_url: str,
+) -> str:
+    """为单个题目调用 AI 生成一条鼓励语，返回 message 文本，失败返回空字符串"""
+    file_path = item.get("file_path", "") or ""
+    days = round((item.get("inactive_hours", 0) or 0) / 24, 1)
 
-    # 构建尽量泛化的上下文，避免鼓励语过度依赖具体题目内容
-    lines = []
-    for it in items:
-        file_path = it.get("file_path", "") or ""
-        days = round((it.get("inactive_hours", 0) or 0) / 24, 1)
-        lines.append(f"- file_path: {file_path}\n  已 {days} 天未练习")
-    items_text = "\n".join(lines)
-    prompt = ENCOURAGEMENT_PROMPT + "\n\n" + items_text + "\n\n请严格输出 JSON 数组，不要输出任何解释："
-
-    logger.info(f"[Encourage] 调用 AI 生成鼓励语，items={len(items)}")
+    items_text = f"- file_path: {file_path}\n  已 {days} 天未练习"
+    prompt = ENCOURAGEMENT_SINGLE_PROMPT + "\n\n" + items_text
 
     headers = {'Content-Type': 'application/json'}
     if ai_config.api_key:
@@ -626,29 +600,114 @@ async def generate_encouragements(items: list[dict]) -> dict:
         body['format'] = 'json'
         body['options'] = {'num_predict': ai_config.max_tokens}
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(ai_config.timeout), trust_env=False) as client:
-        resp = await client.post(api_url, headers=headers, json=body)
-
-    if not resp.is_success:
-        logger.error(f"[Encourage] AI 调用失败：HTTP {resp.status_code}")
-        return {}
-
-    response_data = load_json_relaxed(resp.text)
-    response_text = extract_text_from_response(response_data, api_url)
-    if not response_text:
-        logger.warning("[Encourage] AI 返回空文本")
-        return {}
-
     try:
-        parsed = parse_encouragement_result(response_text)
-        result = {}
-        for entry in parsed:
-            fp = entry.get("file_path", "")
-            msg = (entry.get("message", "") or "").strip()
-            if fp and msg:
-                result[fp] = msg
-        logger.info(f"[Encourage] 成功生成 {len(result)} 条鼓励语")
-        return result
+        async with httpx.AsyncClient(timeout=httpx.Timeout(ai_config.timeout), trust_env=False) as client:
+            resp = await client.post(api_url, headers=headers, json=body)
+
+        # 记录原始响应（只截取前 1000 字符避免日志爆炸）
+        raw_preview = resp.text[:1000]
+        logger.info(f"[Encourage] 原始响应 (file_path={file_path}): status={resp.status_code}, raw={raw_preview}")
+
+        if not resp.is_success:
+            logger.error(f"[Encourage] AI 调用失败：HTTP {resp.status_code}, file_path={file_path}")
+            return ""
+
+        response_data = load_json_relaxed(resp.text)
+        response_text = extract_text_from_response(response_data, api_url)
+        if not response_text:
+            logger.warning(f"[Encourage] AI 返回空文本，file_path={file_path}")
+            return ""
+
+        # 解析单条 JSON：{"message": "..."}
+        cleaned = response_text.strip()
+        cleaned = re.sub(r'^```json\s*', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'^```\s*', '', cleaned)
+        cleaned = re.sub(r'```\s*$', '', cleaned)
+        cleaned = cleaned.strip()
+
+        if not cleaned:
+            logger.warning(f"[Encourage] 清理后文本为空，file_path={file_path}")
+            return ""
+
+        # 尝试直接解析为 JSON
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # 尝试从字符串中提取第一个 JSON 对象
+            decoder = json.JSONDecoder()
+            start = cleaned.find('{')
+            if start != -1:
+                try:
+                    parsed, _ = decoder.raw_decode(cleaned[start:])
+                except json.JSONDecodeError:
+                    parsed = None
+            else:
+                parsed = None
+
+        if isinstance(parsed, dict):
+            msg = parsed.get("message", "") or ""
+            if isinstance(msg, str) and msg.strip():
+                return msg.strip()
+            # 兼容旧格式：直接返回无 message 键时整个文本当 message
+            logger.warning(f"[Encourage] JSON 中无有效 message 字段：{cleaned[:200]}, file_path={file_path}")
+            return ""
+
+        # 如果 AI 直接返回了纯文本（无 JSON），直接当 message 用
+        text = cleaned.strip().strip('"\'"')
+        if text and len(text) < 100:
+            logger.info(f"[Encourage] AI 返回纯文本，直接使用：{text}, file_path={file_path}")
+            return text
+
+        logger.warning(f"[Encourage] 无法解析 AI 响应：{cleaned[:200]}, file_path={file_path}")
+        return ""
+
     except Exception as e:
-        logger.error(f"[Encourage] 解析失败：{e}, raw={response_text[:200]}")
+        logger.error(f"[Encourage] 调用 AI 异常：{e}, file_path={file_path}")
+        return ""
+
+
+async def generate_encouragements(items: list[dict]) -> dict:
+    """
+    逐题单独调用 AI 生成鼓励语。
+    items: [{title, subject, tags, inactive_hours, is_focus_overdue, file_path}, ...]
+    返回：{file_path: message, ...}
+    每道题独立调一次 LLM，互不影响。
+    """
+    from_env = AiConfig.from_env()
+    cfg = {
+        "api_url": os.environ.get("AI_API_URL") or from_env.api_url,
+        "model": os.environ.get("AI_MODEL") or from_env.model,
+        "api_key": os.environ.get("AI_API_KEY") or from_env.api_key,
+    }
+    ai_config = AiConfig(
+        api_url=cfg["api_url"],
+        model=cfg["model"],
+        api_key=cfg["api_key"],
+        timeout=120.0,
+        max_tokens=1024,
+    )
+    api_url = normalize_api_url(ai_config.api_url)
+    if not api_url or not ai_config.model.strip():
+        logger.warning("[Encourage] AI 未配置，跳过鼓励语生成")
         return {}
+
+    logger.info(f"[Encourage] 将逐题调用 AI 生成鼓励语，共 {len(items)} 题")
+
+    result: dict[str, str] = {}
+    for idx, item in enumerate(items):
+        fp = item.get("file_path", "") or ""
+        if not fp:
+            continue
+        logger.info(f"[Encourage] [{idx + 1}/{len(items)}] 正在生成，file_path={fp}")
+        msg = await _generate_single_encouragement(item, ai_config, api_url)
+        if msg:
+            result[fp] = msg
+        else:
+            # 单题调用失败时，使用兜底文案
+            days = round((item.get("inactive_hours", 0) or 0) / 24, 1)
+            fallback = f"这道题已经放了 {days} 天了，不打算看看它吗？"
+            result[fp] = fallback
+            logger.warning(f"[Encourage] [{idx + 1}/{len(items)}] 生成失败，使用兜底文案，file_path={fp}")
+
+    logger.info(f"[Encourage] 全部完成，成功生成 {len(result)}/{len(items)} 条鼓励语")
+    return result
