@@ -301,6 +301,22 @@ const CSS = `
 .mnb .scan-card .info .status { font-weight: 600; font-size: 10.5px; }
 .mnb .scan-card .info .status.new { color: var(--margin); }
 .mnb .scan-card .info .status.indexed { color: var(--accent-2); }
+.mnb .scan-card-delete-btn {
+  position: absolute; top: 4px; right: 4px; z-index: 5;
+  width: 24px; height: 24px; border-radius: 50%;
+  border: none; background: rgba(199,75,75,0.78); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0; opacity: 0; transition: opacity .15s;
+}
+.mnb .scan-card:hover .scan-card-delete-btn { opacity: 1; }
+.mnb .scan-card-delete-btn:hover { background: var(--margin); }
+.mnb .scan-preview-close {
+  position: absolute; top: 14px; right: 14px;
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1.5px solid var(--ink); background: var(--paper);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 62;
+}
 
 /* Subject page header */
 .mnb .subject-page-header {
@@ -1055,6 +1071,12 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
 
+  // --- Scan preview & delete ---
+  const [scanPreviewImage, setScanPreviewImage] = useState(null);
+  const [scanDeleteTarget, setScanDeleteTarget] = useState(null);
+  const [scanDeleting, setScanDeleting] = useState(false);
+  const scanClickTimerRef = useRef(null);
+
   // --- Library state ---
   const [allIndexed, setAllIndexed] = useState([]);
   const [totalIndexedCount, setTotalIndexedCount] = useState(0);
@@ -1275,6 +1297,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [previewSolutionImage]);
 
+  // Esc 关闭扫描页图片预览
+  useEffect(() => {
+    if (!scanPreviewImage) return;
+    const handler = (e) => { if (e.key === 'Escape') setScanPreviewImage(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [scanPreviewImage]);
+
   // --- Config actions ---
   async function saveImageDir() {
     setDirSaving(true);
@@ -1324,6 +1354,45 @@ export default function App() {
       setScanError(e.message || '扫描失败');
     } finally {
       setScanning(false);
+    }
+  }
+
+  // --- Scan card click (distinguish single vs double) ---
+  function handleScanCardClick(filePath) {
+    if (scanClickTimerRef.current) {
+      // 双击 → 大图预览
+      clearTimeout(scanClickTimerRef.current);
+      scanClickTimerRef.current = null;
+      setScanPreviewImage(filePath);
+    } else {
+      // 单击 → 延迟判断，280ms 内没有再点击则触发 AI 分析
+      scanClickTimerRef.current = setTimeout(() => {
+        scanClickTimerRef.current = null;
+        startAnalyze(filePath);
+      }, 280);
+    }
+  }
+
+  // --- Delete unindexed image from scan ---
+  async function deleteScanImage() {
+    if (!scanDeleteTarget) return;
+    setScanDeleting(true);
+    try {
+      await API.purgeImage(scanDeleteTarget);
+      // 重新扫描目录
+      const data = await API.scan();
+      if (!data.by_subject) {
+        data.by_subject = { '未分类': { indexed: data.indexed || [], unindexed: data.unindexed || [] } };
+      }
+      if (!data.subject_order) {
+        data.subject_order = Object.keys(data.by_subject);
+      }
+      setScanData(data);
+      setScanDeleteTarget(null);
+    } catch (e) {
+      console.error('删除扫描图片失败', e);
+    } finally {
+      setScanDeleting(false);
     }
   }
 
@@ -2015,7 +2084,13 @@ export default function App() {
                       <div className="scan-grid">
                         {group.unindexed.map((img) => (
                           <div key={img.file_path} className="scan-card unindexed"
-                            onClick={() => startAnalyze(img.file_path)}>
+                            onClick={() => handleScanCardClick(img.file_path)}
+                            title="单击开始 AI 分析，双击查看原图">
+                            <button className="scan-card-delete-btn"
+                              onClick={(e) => { e.stopPropagation(); setScanDeleteTarget(img.file_path); }}
+                              title="删除图片">
+                              <X size={13} />
+                            </button>
                             <div className="thumb">
                               <img src={API.imageUrl(img.file_path)} alt={img.file_name} loading="lazy" />
                             </div>
@@ -2054,6 +2129,48 @@ export default function App() {
                 </div>
               );
             })}
+            {/* 扫描页删除确认弹窗 */}
+            {scanDeleteTarget && (
+              <div className="modal-overlay" onClick={() => { if (!scanDeleting) setScanDeleteTarget(null); }}>
+                <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+                  <button className="modal-close" onClick={() => { if (!scanDeleting) setScanDeleteTarget(null); }}>
+                    <X size={16} />
+                  </button>
+                  <h2 style={{ fontSize: 17, marginBottom: 8 }}>确认删除</h2>
+                  <p style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.7, marginBottom: 16 }}>
+                    将<strong style={{ color: 'var(--margin)' }}>彻底删除</strong>该图片文件，包括：
+                  </p>
+                  <ul style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.8, marginBottom: 16, paddingLeft: 20 }}>
+                    <li>原题图片 <code style={{ fontSize: 11, background: 'var(--paper)', padding: '1px 6px', borderRadius: 3 }}>{scanDeleteTarget.split(/[\\/]/).pop()}</code></li>
+                    <li>该题关联的解答图片等资源</li>
+                  </ul>
+                  <p style={{ fontSize: 12, color: 'var(--margin)', fontWeight: 600, marginBottom: 16 }}>
+                    ⚠️ 此操作不可恢复
+                  </p>
+                  <div className="modal-actions" style={{ borderTop: 'none', paddingTop: 0 }}>
+                    <button className="save-btn secondary" style={{ marginTop: 0 }}
+                      onClick={() => { if (!scanDeleting) setScanDeleteTarget(null); }}
+                      disabled={scanDeleting}>
+                      取消
+                    </button>
+                    <button className="save-btn" style={{ marginTop: 0, background: 'var(--margin)', borderColor: 'var(--margin)' }}
+                      onClick={deleteScanImage} disabled={scanDeleting}>
+                      {scanDeleting ? '删除中…' : '彻底删除'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 扫描页大图预览 */}
+            {scanPreviewImage && (
+              <div className="image-preview-overlay" onClick={() => setScanPreviewImage(null)}>
+                <div className="image-preview-modal" onClick={(e) => e.stopPropagation()}>
+                  <button className="scan-preview-close" onClick={() => setScanPreviewImage(null)}><X size={16} /></button>
+                  <img src={API.imageUrl(scanPreviewImage)} alt="原题预览" />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
