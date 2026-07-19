@@ -3,6 +3,7 @@ import json
 import base64
 import re
 import argparse
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -24,7 +25,19 @@ def _generate_solution_filename(original_path: str, index: int, ext: str) -> str
     stem = Path(original_path).stem
     return f"{stem}_sol_{index}.{ext}"
 
-app = FastAPI(title="Smart Mistake Lab Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理（替代已弃用的 on_event）"""
+    logger.info("Smart Mistake Lab Server 初始化本地数据库...")
+    db.init_db()
+    cfg = AiConfig.from_env()
+    logger.info(f"AI 配置：api_url={cfg.api_url}, model={cfg.model}, "
+                f"has_api_key={'Yes' if cfg.api_key else 'No'}, timeout={cfg.timeout}s, max_tokens={cfg.max_tokens}")
+    logger.info("Smart Mistake Lab Server 启动完成")
+    yield
+
+
+app = FastAPI(title="Smart Mistake Lab Server", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,16 +89,6 @@ def _scan_images_in_dir(directory: str, indexed_paths: set) -> list:
     except Exception:
         pass
     return result
-
-
-@app.on_event("startup")
-def startup():
-    db.init_db()
-    logger.info("Smart Mistake Lab Server 启动完成")
-    # 输出配置信息，但不输出完整的 API Key
-    cfg = AiConfig.from_env()
-    logger.info(f"AI 配置：api_url={cfg.api_url}, model={cfg.model}, "
-                f"has_api_key={'Yes' if cfg.api_key else 'No'}, timeout={cfg.timeout}s, max_tokens={cfg.max_tokens}")
 
 
 # --- Health ---
@@ -322,7 +325,7 @@ def update_image(data: dict):
 def delete_image(file_path: str = Query(..., description="图片文件路径")):
     """仅移除索引，不删除任何文件"""
     db.delete_image(file_path)
-    logger.info(f"[API] 已移除索引: {file_path}")
+    logger.info(f"[API] 已移除索引：{file_path}")
     return {"status": "ok"}
 
 
@@ -340,7 +343,7 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
     meta = db.get_image_by_path(file_path)
     if not meta:
         # 没有索引记录，但仍可尝试删除文件（兼容无索引但有文件的场景）
-        logger.warning(f"[purge] 数据库中无记录: {file_path}，将仅尝试删除文件")
+        logger.warning(f"[purge] 数据库中无记录：{file_path}，将仅尝试删除文件")
         meta = {"file_path": file_path, "solution": {}}
 
     solution = meta.get("solution", {})
@@ -362,9 +365,9 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
     norm_image_dir = os.path.normpath(image_dir)
     for fp in files_to_delete:
         if os.path.normpath(fp) != os.path.normpath(os.path.join(norm_image_dir, os.path.relpath(fp, norm_image_dir))):
-            raise HTTPException(status_code=403, detail=f"安全限制：不允许删除 image_dir 之外的路径: {fp}")
+            raise HTTPException(status_code=403, detail=f"安全限制：不允许删除 image_dir 之外的路径：{fp}")
 
-    logger.info(f"[purge] 将彻底删除 {len(files_to_delete)} 个文件: {files_to_delete}")
+    logger.info(f"[purge] 将彻底删除 {len(files_to_delete)} 个文件：{files_to_delete}")
 
     # 4. 先删解答图片，再删原题图片，最后删数据库
     deleted = []
@@ -376,31 +379,31 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             if os.path.isfile(fp):
                 os.remove(fp)
                 deleted.append(fp)
-                logger.info(f"[purge] 已删除文件: {fp}")
+                logger.info(f"[purge] 已删除文件：{fp}")
             else:
                 missing.append(fp)
                 logger.info(f"[purge] 文件不存在（跳过）: {fp}")
         except Exception as exc:
             failed.append(fp)
-            logger.error(f"[purge] 删除文件失败: {fp}, 错误: {exc}")
+            logger.error(f"[purge] 删除文件失败：{fp}, 错误：{exc}")
 
     # 5. 只要有原题图片删除失败，就不删数据库记录
     if file_path in failed:
         raise HTTPException(
             status_code=500,
-            detail=f"原题图片删除失败: {file_path}，索引未删除。已删除: {deleted}, 失败: {failed}"
+            detail=f"原题图片删除失败：{file_path}，索引未删除。已删除：{deleted}, 失败：{failed}"
         )
 
     # 如果解答图片有删除失败，也不删数据库（保持完整性）
     if failed:
         raise HTTPException(
             status_code=500,
-            detail=f"部分文件删除失败，索引未删除。已删除: {deleted}, 失败: {failed}"
+            detail=f"部分文件删除失败，索引未删除。已删除：{deleted}, 失败：{failed}"
         )
 
     # 6. 删除数据库记录
     db.delete_image(file_path)
-    logger.info(f"[purge] 彻底删除完成: {file_path}, 删除文件数: {len(deleted)}")
+    logger.info(f"[purge] 彻底删除完成：{file_path}, 删除文件数：{len(deleted)}")
 
     return {
         "status": "ok",
@@ -462,7 +465,7 @@ def get_all_images(
 FOCUS_MAX_COUNT = 5
 
 
-def _calc_overdue_fields(item: dict, timeout_hours: int, now_dt: datetime = None):
+def _calc_overdue_fields(item: dict, timeout_hours: int, now_dt: datetime | None = None):
     """为单个重点练题目计算超时相关派生字段，原地修改 item"""
     if now_dt is None:
         now_dt = datetime.now()
@@ -521,8 +524,8 @@ def get_focus_practice():
 async def get_focus_reminders(data: dict):
     """
     批量生成超时题目的鼓励语。
-    请求体: {"items": [{title, subject, tags, inactive_hours, is_focus_overdue, file_path}, ...]}
-    返回: {"reminders": {file_path: message, ...}}
+    请求体：{"items": [{title, subject, tags, inactive_hours, is_focus_overdue, file_path}, ...]}
+    返回：{"reminders": {file_path: message, ...}}
     """
     if not data or "items" not in data:
         return {"reminders": {}}
@@ -533,7 +536,7 @@ async def get_focus_reminders(data: dict):
         reminders = await generate_encouragements(overdue_items)
         return {"reminders": reminders}
     except Exception as e:
-        logger.error(f"生成鼓励语失败: {e}")
+        logger.error(f"生成鼓励语失败：{e}")
         # 兜底：返回空，前端用固定文案
         return {"reminders": {}}
 
@@ -600,7 +603,7 @@ def upload_solution_image(data: dict):
 def delete_solution_image(path: str = Query(..., description="解答图片的绝对路径")):
     if not os.path.isfile(path):
         # 幂等删除：文件已不存在时也返回成功，方便前端清理数据库中的历史引用
-        logger.info(f"[solution-image] 文件不存在，按已删除处理: {path}")
+        logger.info(f"[solution-image] 文件不存在，按已删除处理：{path}")
         return {"status": "ok", "missing": True}
     os.remove(path)
     return {"status": "ok"}
@@ -698,4 +701,5 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1", help="监听地址，默认 127.0.0.1")
     parser.add_argument("--port", type=int, default=8765, help="监听端口，默认 8765")
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port)
+    logger.info("About to call uvicorn.run()...")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="debug")
