@@ -3,6 +3,8 @@ SSmart Mistake Lab - LLM 交互模块
 负责 Prompt 管理、AI API 调用、响应解析。
 """
 
+from __future__ import annotations
+
 import base64
 import json
 import os

@@ -65,12 +65,29 @@ Write-Host ""
 # ─── 启动后端 ────────────────────────────────────
 if (-not $NoBackend) {
     Write-Host "▸ [1/2] 启动后端服务 (FastAPI) ..." -ForegroundColor Green
-    Start-Process powershell -ArgumentList @(
-        "-NoExit", "-Command",
-        $BackendCommand
-    ) -WindowStyle Normal
-    Write-Host "  ✓ 后端服务窗口已创建 (http://$BackendHost`:8765)" -ForegroundColor DarkGreen
-    Write-Host "  ✓ 后端日志将显示在独立窗口中" -ForegroundColor DarkGray
+    $BackendCmdOnly = "uv run python server.py"
+    if ($Ip) {
+        $BackendCmdOnly += " --host '$Ip'"
+    }
+
+    # 构建 WT 参数：-w 0 (当前窗口) new-tab (新标签) -d (工作目录)
+    $wtArgs = @(
+        "-w", "0",
+        "new-tab",
+        "-d", $ServerDir,
+        "powershell.exe", "-NoExit", "-Command", "& { $BackendCmdOnly }"
+    )
+
+    try {
+        Start-Process wt -ArgumentList $wtArgs -ErrorAction Stop
+        Write-Host "  ✓ 后端服务已在 Windows Terminal 新标签页中启动" -ForegroundColor DarkGreen
+    }
+    catch {
+        # 如果用户没用 Windows Terminal，就尝试传统的 Start-Process 模式防止脚本崩溃
+        Write-Warning "无法使用 Windows Terminal 启动新标签，正在尝试传统窗口模式..."
+        Start-Process powershell -ArgumentList @("-NoExit", "-Command", $BackendCommand)
+    }
+
     Write-Host ""
     Start-Sleep 3
 }
@@ -78,6 +95,18 @@ if (-not $NoBackend) {
 # ─── 启动前端 ────────────────────────────────────
 if (-not $NoFrontend) {
     Write-Host "▸ [2/2] 启动前端服务 (Vite) ..." -ForegroundColor Green
+
+    # New: Open Chrome to the frontend URL
+    $FrontendUrl = "http://$($FrontendHost):5173"
+    Write-Host "  正在尝试打开浏览器访问: $FrontendUrl" -ForegroundColor Gray
+    try {
+        Start-Process chrome $FrontendUrl 2>$null
+    }
+    catch {
+        # If Chrome fails, try to open the default browser with the URL
+        Start-Process $FrontendUrl 2>$null
+    }
+
     Write-Host ""
     Write-Host "  打开浏览器访问:" -ForegroundColor White
     Write-Host "  ┌─────────────────────────────────────┐" -ForegroundColor Cyan
@@ -102,3 +131,4 @@ if (-not $NoFrontend) {
         Pop-Location
     }
 }
+
