@@ -278,7 +278,7 @@ const CSS = `
 
 .mnb .scan-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
   margin-bottom: 24px;
 }
@@ -290,10 +290,10 @@ const CSS = `
 .mnb .scan-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px var(--shadow); }
 .mnb .scan-card.unindexed { border-color: var(--accent); }
 .mnb .scan-card .thumb {
-  height: 100px; overflow: hidden; background: var(--grid);
+  height: auto; overflow: hidden; background: var(--grid);
   display: flex; align-items: center; justify-content: center;
 }
-.mnb .scan-card .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mnb .scan-card .thumb img { width: 100%; height: auto; display: block; max-height: 360px; object-fit: contain; }
 .mnb .scan-card .info {
   padding: 8px 10px; font-size: 11px; color: var(--ink-soft);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -617,7 +617,7 @@ const CSS = `
   .mnb .holes { display: none; }
   .mnb h1 { font-size: 24px; }
   .mnb .panel { padding: 16px; }
-  .mnb .scan-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .mnb .scan-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 
 /* Subject tab bar */
@@ -1979,7 +1979,7 @@ export default function App() {
               </button>
               {scanData && (
                 <span className="scan-stats">
-                  共 {scanData.total} 张 · 已索引 {scanData.indexed_count} · 待索引 {scanData.unindexed_count}
+                  待索引 {scanData.unindexed_count} 张
                 </span>
               )}
             </div>
@@ -2071,61 +2071,34 @@ export default function App() {
               <div className="empty"><FolderOpen size={36} /><p>请先在"配置"页面设置图片存放目录</p></div>
             )}
 
-            {/* Subject-grouped scan results (use subject_order from backend) */}
+            {/* 仅显示未索引题目 */}
             {scanData && !analyzingFile && (scanData.subject_order || Object.keys(scanData.by_subject || {})).map((subject) => {
               const group = scanData.by_subject[subject]; if (!group) return null;
+              // 该学科下无未索引题目时跳过
+              if (!group.unindexed || group.unindexed.length === 0) return null;
               return (
                 <div key={subject} style={{ marginBottom: 24 }}>
-                  <div className="section-title">{subject || '未分类'} <span className="badge" style={{ marginLeft: 8, fontSize: 11 }}>{((group.indexed || []).length + (group.unindexed || []).length)} 张</span></div>
-                  {/* Unindexed in this subject */}
-                  {(group.unindexed || []).length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--margin)', marginBottom: 8 }}>待索引 <span className="badge">{group.unindexed.length}</span></div>
-                      <div className="scan-grid">
-                        {group.unindexed.map((img) => (
-                          <div key={img.file_path} className="scan-card unindexed"
-                            onClick={() => handleScanCardClick(img.file_path)}
-                            title="单击开始 AI 分析，双击查看原图">
-                            <button className="scan-card-delete-btn"
-                              onClick={(e) => { e.stopPropagation(); setScanDeleteTarget(img.file_path); }}
-                              title="删除图片">
-                              <X size={13} />
-                            </button>
-                            <div className="thumb">
-                              <img src={API.imageUrl(img.file_path)} alt={img.file_name} loading="lazy" />
-                            </div>
-                            <div className="info">
-                              <span className="status new">● 待索引</span>
-                              <div style={{ fontSize: 10.5, marginTop: 2 }}>{img.file_name}</div>
-                            </div>
-                          </div>
-                        ))}
+                  <div className="section-title">{subject || '未分类'} <span className="badge" style={{ marginLeft: 8, fontSize: 11 }}>{(group.unindexed || []).length} 张</span></div>
+                  <div className="scan-grid">
+                    {group.unindexed.map((img) => (
+                      <div key={img.file_path} className="scan-card unindexed"
+                        onClick={() => handleScanCardClick(img.file_path)}
+                        title="单击开始 AI 分析，双击查看原图">
+                        <button className="scan-card-delete-btn"
+                          onClick={(e) => { e.stopPropagation(); setScanDeleteTarget(img.file_path); }}
+                          title="删除图片">
+                          <X size={13} />
+                        </button>
+                        <div className="thumb">
+                          <img src={API.imageUrl(img.file_path)} alt={img.file_name} loading="lazy" />
+                        </div>
+                        <div className="info">
+                          <span className="status new">● 待索引</span>
+                          <div style={{ fontSize: 10.5, marginTop: 2 }}>{img.file_name}</div>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {/* Indexed in this subject */}
-                  {(group.indexed || []).length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent-2)', marginBottom: 8 }}>已索引 <span className="badge green">{group.indexed.length}</span></div>
-                      <div className="scan-grid">
-                        {group.indexed.map((img) => (
-                          <div key={img.file_path} className="scan-card"
-                            onClick={() => openDetail(img)}>
-                            <div className="thumb">
-                              <img src={API.imageUrl(img.file_path)} alt={img.title} loading="lazy" />
-                            </div>
-                            <div className="info">
-                              <span className="status indexed">● 已索引</span>
-                              <div style={{ fontSize: 10.5, marginTop: 2, fontWeight: 600 }}>{img.title}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {(!group.indexed || group.indexed.length === 0) && (!group.unindexed || group.unindexed.length === 0) && (
-                    <div style={{ fontSize: 12.5, color: 'var(--ink-soft)', padding: '8px 0' }}>该学科暂无图片</div>
-                  )}
+                    ))}
+                  </div>
                 </div>
               );
             })}
