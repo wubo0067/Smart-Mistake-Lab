@@ -682,14 +682,18 @@ const CSS = `
 .mnb .date-section-header {
   display: flex; align-items: baseline; gap: 10px;
   padding: 6px 0 10px; margin-bottom: 6px;
-  border-bottom: 1.5px dashed var(--grid);
+  border-bottom: 2px solid var(--accent-2);
 }
 .mnb .date-section-label {
   font-family: "Songti SC", "STSong", serif;
-  font-size: 15px; font-weight: 700; color: var(--ink);
+  font-size: 18px; font-weight: 800; color: var(--accent-2);
+  letter-spacing: 0.5px;
+  padding: 2px 10px 2px 0;
 }
 .mnb .date-section-count {
-  font-size: 12px; color: var(--pencil); font-weight: 400;
+  font-size: 13px; color: var(--ink-soft); font-weight: 600;
+  background: var(--paper); padding: 1px 10px; border-radius: 4px;
+  border: 1px solid var(--grid);
 }
 .mnb .sidebar-tag-count {
   font-size: 11px; color: var(--pencil); font-weight: 400; margin-left: 6px; flex-shrink: 0;
