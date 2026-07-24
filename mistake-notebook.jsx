@@ -2441,7 +2441,7 @@ export default function App() {
               <div className="field">
                 <label className="field-label">备注</label>
                 <textarea rows={3} value={detailNotes}
-                  onChange={(e) => { setDetailNotes(e.target.value); detailNotesRef.current = e.target.value; }}
+                  onChange={(e) => { setDetailNotes(e.target.value); detailNotesRef.current = e.target.value; setDetailDirty(true); }}
                   onBlur={saveDetailNotes}
                   placeholder="人工备注，记录解题思路或易错点…" />
               </div>
@@ -2452,7 +2452,7 @@ export default function App() {
                   ref={solutionTextareaRef}
                   rows={5}
                   value={solutionText}
-                  onChange={(e) => { setSolutionText(e.target.value); solutionTextRef.current = e.target.value; }}
+                  onChange={(e) => { setSolutionText(e.target.value); solutionTextRef.current = e.target.value; setDetailDirty(true); }}
                   onBlur={saveSolutionText}
                   onPaste={handleSolutionPaste}
                   placeholder="输入解题思路，或直接在这里粘贴截图…"
