@@ -383,8 +383,8 @@ const CSS = `
 .mnb .count-badge { opacity: 0.65; font-weight: 400; margin-left: 3px; }
 .mnb .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
 }
 .mnb .card {
   background: var(--card); border: 1.5px solid var(--ink); border-radius: 8px;
@@ -393,10 +393,10 @@ const CSS = `
 }
 .mnb .card:hover { transform: translateY(-3px); box-shadow: 0 8px 18px var(--shadow); }
 .mnb .card-thumb {
-  height: 130px; overflow: hidden; border-bottom: 1.5px solid var(--grid);
+  height: 200px; overflow: hidden; border-bottom: 1.5px solid var(--grid);
   background: var(--grid);
 }
-.mnb .card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mnb .card-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .mnb .card-body { padding: 10px 12px 12px; flex: 1; display: flex; flex-direction: column; }
 .mnb .card-title {
   font-weight: 700; font-size: 13.5px; margin: 0 0 6px;
