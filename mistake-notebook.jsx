@@ -682,11 +682,11 @@ const CSS = `
 .mnb .date-section-header {
   display: flex; align-items: baseline; gap: 10px;
   padding: 6px 0 10px; margin-bottom: 6px;
-  border-bottom: 2px solid var(--accent-2);
+  border-bottom: 2px solid #7C3AED;
 }
 .mnb .date-section-label {
   font-family: "Songti SC", "STSong", serif;
-  font-size: 18px; font-weight: 800; color: var(--accent-2);
+  font-size: 18px; font-weight: 800; color: #7C3AED;
   letter-spacing: 0.5px;
   padding: 2px 10px 2px 0;
 }
