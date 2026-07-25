@@ -498,13 +498,13 @@ async def analyze_image(
 
 # ============== 鼓励语生成 ==============
 
-ENCOURAGEMENT_SINGLE_PROMPT = """你是一名学习督促助手。请为下面这道超时未练习的错题生成一句鼓励语。
+ENCOURAGEMENT_SINGLE_PROMPT = """你是一名学习督促助手。请为下面这道错题生成一句鼓励语。
 
 要求：
 - 不超过 18 个汉字
 - 语气幽默、自然、轻松，不要像在上课
 - 鼓励但不说教，不要用"加油""你可以的"这类空话
-- 不要围绕具体题目内容展开，不要复述题干、学科、标签等信息
+- 不要复述题干、学科名、标签等信息，但可以借助学科背景使语气更有针对性
 - 可以轻微调侃拖延练习的状态，但不要冒犯
 - 更像一句短促、顺口的提醒，而不是分析建议
 - 只输出 JSON 对象，不要输出任何其他文字，不要用 markdown 代码块包裹
@@ -590,9 +590,11 @@ async def _generate_single_encouragement(
 ) -> str:
     """为单个题目调用 AI 生成一条鼓励语，返回 message 文本，失败返回空字符串"""
     file_path = item.get("file_path", "") or ""
+    title = item.get("title", "") or ""
+    subject = item.get("subject", "") or ""
     days = round((item.get("inactive_hours", 0) or 0) / 24, 1)
 
-    items_text = f"- file_path: {file_path}\n  已 {days} 天未练习"
+    items_text = f"- 题目: {title if title else '未命名'}\n  学科: {subject if subject else '未分类'}\n  已 {days} 天未练习"
     prompt = ENCOURAGEMENT_SINGLE_PROMPT + "\n\n" + items_text
 
     headers = {'Content-Type': 'application/json'}

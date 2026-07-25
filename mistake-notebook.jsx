@@ -78,8 +78,9 @@ const API = {
     const url = '/api/images/all' + (qsStr ? '?' + qsStr : '');
     return (await apiFetch(url)).json();
   },
-  async getFocusImages() {
-    return (await apiFetch('/api/images/focus')).json();
+  async getFocusImages(subject) {
+    const url = subject ? `/api/images/focus?subject=${encodeURIComponent(subject)}` : '/api/images/focus';
+    return (await apiFetch(url)).json();
   },
   async toggleFocusPractice(filePath, enabled) {
     return (await apiFetch('/api/images/focus', {
@@ -620,10 +621,29 @@ const CSS = `
   .mnb .scan-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 
-/* Subject tab bar */
+/* Subject tab bar (library) */
 .mnb .subject-tab-bar {
   display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px;
   padding-bottom: 14px; border-bottom: 2px solid var(--grid);
+}
+
+/* Focus subject sections */
+.mnb .focus-subject-section { margin-bottom: 28px; }
+.mnb .focus-subject-header {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 0 10px; margin-bottom: 6px;
+  border-bottom: 2px solid var(--accent-2);
+}
+.mnb .focus-subject-label {
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 18px; font-weight: 800; color: var(--accent-2);
+  letter-spacing: 0.5px;
+  padding: 2px 10px 2px 0;
+}
+.mnb .focus-subject-count {
+  font-size: 13px; color: var(--ink-soft); font-weight: 600;
+  background: var(--paper); padding: 1px 10px; border-radius: 4px;
+  border: 1px solid var(--grid);
 }
 
 /* Library layout: sidebar + main */
@@ -818,58 +838,7 @@ const CSS = `
   color: #b45309;
 }
 
-/* ========= Focus Reminder Banner ========= */
-.mnb .focus-reminder-banner {
-  background: #fef2f2;
-  border: 1.5px solid #fca5a5;
-  border-radius: 10px;
-  padding: 14px 16px;
-  margin-bottom: 20px;
-}
-
-.mnb .focus-reminder-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #b91c1c;
-  margin-bottom: 10px;
-}
-
-.mnb .focus-reminder-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.mnb .focus-reminder-item {
-  font-size: 13px;
-  color: #7f1d1d;
-  line-height: 1.5;
-}
-
-.mnb .focus-reminder-name {
-  font-weight: 600;
-}
-
-.mnb .focus-reminder-days {
-  color: #b91c1c;
-  font-weight: 500;
-}
-
-.mnb .focus-reminder-msg {
-  color: #15803d;
-  font-weight: 600;
-  font-style: italic;
-}
-.mnb .focus-reminder-msg.loading {
-  color: #9ca3af;
-  font-style: normal;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: .4; }
-  50% { opacity: 1; }
-}
+/* (focus-reminder-banner removed per user request) */
 
 /* ========= Overdue Card ========= */
 .mnb .card-overdue {
@@ -886,6 +855,24 @@ const CSS = `
   font-weight: 600;
   color: #dc2626;
   line-height: 1.4;
+}
+
+.mnb .card-reminder {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b91c1c;
+  line-height: 1.4;
+  padding: 6px 10px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.mnb .card-reminder.loading {
+  color: var(--ink-soft);
+  background: #F5F3EC;
+  font-weight: 400;
 }
 
 .mnb .card-focus-context .card-body {
@@ -1012,7 +999,7 @@ const MASTERY_LABELS = {
   practice: '🔄 勤复习',
 };
 
-function ProblemCard({ problem, imageUrl, onClick, showOverdue }) {
+function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, reminderLoading }) {
   const isOverdue = showOverdue && problem.is_focus_overdue;
   return (
     <div className={'card' + (isOverdue ? ' card-overdue' : '') + (showOverdue ? ' card-focus-context' : '')} onClick={onClick}>
@@ -1041,6 +1028,16 @@ function ProblemCard({ problem, imageUrl, onClick, showOverdue }) {
         {isOverdue && (
           <div className="card-overdue-info">
             ⏰ {problem.inactive_days_text || '0 天'}未练习
+          </div>
+        )}
+        {showOverdue && reminder && (
+          <div className="card-reminder">
+            💬 {reminder}
+          </div>
+        )}
+        {showOverdue && reminderLoading && !reminder && (
+          <div className="card-reminder loading">
+            <Loader2 size={11} className="spin" /> 生成鼓励语…
           </div>
         )}
       </div>
@@ -1107,6 +1104,8 @@ export default function App() {
   const [focusOverdueCount, setFocusOverdueCount] = useState(0);
   const [focusReminders, setFocusReminders] = useState({});
   const [focusRemindersLoading, setFocusRemindersLoading] = useState(false);
+  const [focusMaxPerSubject, setFocusMaxPerSubject] = useState(5);
+  const [focusSubjects, setFocusSubjects] = useState([]);
 
   // --- Detail modal ---
   const [detail, setDetail] = useState(null);
@@ -1150,6 +1149,12 @@ export default function App() {
         if (v > 0) {
           setFocusTimeoutHours(v);
           setFocusTimeoutInput(String(v));
+        }
+      }
+      if (c.focus_max_per_subject) {
+        const v = Number(c.focus_max_per_subject);
+        if (v > 0) {
+          setFocusMaxPerSubject(v);
         }
       }
     }).catch(() => { });
@@ -1210,9 +1215,11 @@ export default function App() {
       setFocusCount(data.count ?? 0);
       setFocusTimeoutCfg(data.timeout_hours ?? 48);
       setFocusOverdueCount(data.overdue_count ?? 0);
+      setFocusMaxPerSubject(data.max_count ?? 5);
+      if (data.subjects) setFocusSubjects(data.subjects);
       setFocusError('');
-      // 如果有超时题目，异步加载鼓励语
-      if ((data.overdue_count ?? 0) > 0 && (data.items ?? []).length > 0) {
+      // 为所有重点练题目异步加载鼓励语
+      if ((data.items ?? []).length > 0) {
         loadReminders(data.items);
       }
     } catch (e) {
@@ -1244,10 +1251,12 @@ export default function App() {
       const focusData = await API.getFocusImages();
       setFocusItems(focusData.items || []);
       setFocusCount(focusData.count ?? 0);
+      setFocusMaxPerSubject(focusData.max_count ?? 5);
       setFocusOverdueCount(focusData.overdue_count ?? 0);
+      if (focusData.subjects) setFocusSubjects(focusData.subjects);
       // 清除旧提醒，重新加载
       setFocusReminders({});
-      if ((focusData.overdue_count ?? 0) > 0) {
+      if ((focusData.items ?? []).length > 0) {
         loadReminders(focusData.items);
       }
       // 同步更新错题库中该题的 is_focus_practice 状态
@@ -1320,10 +1329,18 @@ export default function App() {
       if (!isNaN(timeoutVal) && timeoutVal >= 1 && timeoutVal <= 720) {
         payload.focus_timeout_hours = timeoutVal;
       }
+      // 同时保存每学科重点练上限
+      const maxPerSubjectVal = Number(focusMaxPerSubject);
+      if (!isNaN(maxPerSubjectVal) && maxPerSubjectVal >= 1 && maxPerSubjectVal <= 50) {
+        payload.focus_max_per_subject = maxPerSubjectVal;
+      }
       const result = await API.saveConfig(payload);
       setImageDir(dirInput.trim());
       if (result.focus_timeout_hours) {
         setFocusTimeoutHours(Number(result.focus_timeout_hours));
+      }
+      if (result.focus_max_per_subject) {
+        setFocusMaxPerSubject(Number(result.focus_max_per_subject));
       }
       setDirMsg('配置已保存');
     } catch (e) {
@@ -1959,12 +1976,35 @@ export default function App() {
               </div>
             </div>
 
+            <div className="config-box" style={{ marginTop: 20 }}>
+              <h2 className="config-title">重点练数量</h2>
+              <p className="config-hint">
+                设置每个学科最多可同时标记的重点练题目数。
+              </p>
+              <div className="field">
+                <label className="field-label">每学科上限</label>
+                <input type="number" value={focusMaxPerSubject}
+                  min={1} max={50}
+                  onChange={(e) => setFocusMaxPerSubject(Number(e.target.value) || 5)}
+                  placeholder="默认 5" />
+                <span style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4, display: 'block' }}>
+                  当前值：{focusMaxPerSubject} 道/学科
+                </span>
+              </div>
+            </div>
+
             <div className="config-box" style={{ marginTop: 8 }}>
               <button className="save-btn" style={{ marginTop: 0 }} onClick={saveImageDir} disabled={dirSaving}>
                 {dirSaving ? '保存中…' : '保存配置'}
               </button>
               {dirMsg && <div className={'save-msg' + (dirMsg.includes('失败') ? ' error' : '')}>{dirMsg}</div>}
             </div>
+
+            {dirMsg && dirMsg.includes('成功') && (
+              <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4, paddingLeft: 4 }}>
+                💡 提示：设置每学科重点练上限后，需切换一次「重点练」标签页即可生效。
+              </div>
+            )}
           </div>
         )}
 
@@ -2294,42 +2334,20 @@ export default function App() {
                     <h2 className="focus-page-title">📌 重点练</h2>
                     <p className="focus-page-desc">
                       从错题库中标记需要重点练习的题目，集中攻克薄弱环节。
-                      <br />最多同时标记 <strong>5</strong> 道题为重点练。
+                      <br />每学科最多同时标记 <strong>{focusMaxPerSubject}</strong> 道题为重点练。
                       {focusTimeoutCfg > 0 && (
                         <span> 超 {focusTimeoutCfg} 小时（{Math.round(focusTimeoutCfg / 24 * 10) / 10} 天）未练即触发督促。</span>
                       )}
                     </p>
                   </div>
                   <div className="focus-count-badge">
-                    <span className={`focus-count-num ${focusCount >= 5 ? 'full' : ''}`}>{focusCount}</span>
+                    <span className={`focus-count-num ${focusCount >= focusMaxPerSubject ? 'full' : ''}`}>{focusCount}</span>
                     <span className="focus-count-sep">/</span>
-                    <span className="focus-count-max">5</span>
+                    <span className="focus-count-max">{focusMaxPerSubject}</span>
                   </div>
                 </div>
 
-                {/* 督促提醒横幅 */}
-                {focusOverdueCount > 0 && (
-                  <div className="focus-reminder-banner">
-                    <div className="focus-reminder-title">
-                      ⏰ 你有 <strong>{focusOverdueCount}</strong> 道重点练题目待练习
-                    </div>
-                    <div className="focus-reminder-list">
-                      {focusItems.filter(p => p.is_focus_overdue).map(p => (
-                        <div key={p.file_path} className="focus-reminder-item">
-                          <span className="focus-reminder-name">{p.title || '未命名'}</span>
-                          <span className="focus-reminder-days">· {p.inactive_days_text || '0 天'}未练习</span>
-                          {focusRemindersLoading ? (
-                            <span className="focus-reminder-msg loading">生成鼓励语…</span>
-                          ) : focusReminders[p.file_path] ? (
-                            <span className="focus-reminder-msg">· {focusReminders[p.file_path]}</span>
-                          ) : (
-                            <span className="focus-reminder-msg">· 快去练一遍吧</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                {/* 督促提醒横幅已删除 */}
 
                 {!focusLoaded ? (
                   <div className="empty"><Loader2 size={28} className="spin" /><p>加载中…</p></div>
@@ -2339,16 +2357,42 @@ export default function App() {
                   <div className="empty"><BookOpen size={40} /><p>还没有重点练题目</p>
                     <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>在错题库中打开任意错题，点击「设为重点练」即可加入</p>
                   </div>
-                ) : (
-                  <div className="grid">
-                    {focusItems.map((p) => (
-                      <ProblemCard key={p.file_path} problem={p}
-                        imageUrl={API.imageUrl(p.file_path)}
-                        onClick={() => openDetail(p)}
-                        showOverdue={true} />
-                    ))}
-                  </div>
-                )}
+                ) : (() => {
+                  // 按学科分组
+                  const groups = {};
+                  focusItems.forEach(p => {
+                    const subj = p.subject || '未分类';
+                    if (!groups[subj]) groups[subj] = [];
+                    groups[subj].push(p);
+                  });
+                  const subjectOrder = ['数学', '物理', '化学', '英语', '语文'];
+                  const sortedKeys = Object.keys(groups).sort((a, b) => {
+                    const ia = subjectOrder.indexOf(a);
+                    const ib = subjectOrder.indexOf(b);
+                    if (ia !== -1 && ib !== -1) return ia - ib;
+                    if (ia !== -1) return -1;
+                    if (ib !== -1) return 1;
+                    return a.localeCompare(b, 'zh');
+                  });
+                  return sortedKeys.map(subj => (
+                    <div key={subj} className="focus-subject-section">
+                      <div className="focus-subject-header">
+                        <span className="focus-subject-label">{subj}</span>
+                        <span className="focus-subject-count">{groups[subj].length} 题</span>
+                      </div>
+                      <div className="grid">
+                        {groups[subj].map((p) => (
+                          <ProblemCard key={p.file_path} problem={p}
+                            imageUrl={API.imageUrl(p.file_path)}
+                            onClick={() => openDetail(p)}
+                            showOverdue={true}
+                            reminder={focusReminders[p.file_path]}
+                            reminderLoading={focusRemindersLoading} />
+                        ))}
+                      </div>
+                    </div>
+                  ));
+                })()}
               </div>
             </div>
           );

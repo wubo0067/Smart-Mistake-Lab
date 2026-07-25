@@ -105,6 +105,7 @@ def get_config():
     return {
         "image_dir": db.get_config_value("image_dir") or "",
         "focus_timeout_hours": db.get_focus_timeout_hours(),
+        "focus_max_per_subject": db.get_focus_max_per_subject(),
     }
 
 
@@ -126,6 +127,19 @@ def update_config(data: dict):
                 logger.info(f"重点练超时阈值已更新：{num} 小时")
             except (ValueError, TypeError):
                 raise HTTPException(status_code=400, detail="focus_timeout_hours 必须为有效数字")
+    if "focus_max_per_subject" in data:
+        val = data["focus_max_per_subject"]
+        if val is not None and val != "":
+            try:
+                num = int(val)
+                if num < 1:
+                    num = 1
+                if num > 50:
+                    num = 50
+                db.set_config_value("focus_max_per_subject", str(num))
+                logger.info(f"每学科重点练上限已更新：{num}")
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="focus_max_per_subject 必须为有效数字")
     return get_config()
 
 
@@ -462,8 +476,6 @@ def get_all_images(
 
 # --- Focus Practice ---
 
-FOCUS_MAX_COUNT = 5
-
 
 def _calc_overdue_fields(item: dict, timeout_hours: int, now_dt: datetime | None = None):
     """为单个重点练题目计算超时相关派生字段，原地修改 item"""
@@ -489,10 +501,12 @@ def _calc_overdue_fields(item: dict, timeout_hours: int, now_dt: datetime | None
 
 
 @app.get("/api/images/focus")
-def get_focus_practice():
+def get_focus_practice(subject: str = Query("", description="学科筛选（可选）")):
     now_dt = datetime.now()
     timeout_hours = db.get_focus_timeout_hours()
-    items = db.get_focus_practice_images()
+    max_per_subject = db.get_focus_max_per_subject()
+    subject_param = subject.strip() or None
+    items = db.get_focus_practice_images(subject=subject_param)
     for it in items:
         _calc_overdue_fields(it, timeout_hours, now_dt)
     # 排序：超时优先，再按超时程度降序，未超时按 focus_marked_at 降序
@@ -511,29 +525,32 @@ def get_focus_practice():
         return (0 if od else 1, -ih if od else 0, fma_key)
     items.sort(key=sort_key)
     overdue_count = sum(1 for it in items if it.get("is_focus_overdue"))
+    # 获取各学科重点练摘要
+    subjects = db.get_focus_practice_subject_counts()
     return {
         "items": items,
         "count": len(items),
-        "max_count": FOCUS_MAX_COUNT,
+        "max_count": max_per_subject,
         "timeout_hours": timeout_hours,
         "overdue_count": overdue_count,
+        "subjects": subjects,
     }
 
 
 @app.post("/api/images/focus/reminders")
 async def get_focus_reminders(data: dict):
     """
-    批量生成超时题目的鼓励语。
+    批量生成重点练题目的鼓励语（所有题目都生成，不限于超期）。
     请求体：{"items": [{title, subject, tags, inactive_hours, is_focus_overdue, file_path}, ...]}
     返回：{"reminders": {file_path: message, ...}}
     """
     if not data or "items" not in data:
         return {"reminders": {}}
-    overdue_items = [it for it in data["items"] if it.get("is_focus_overdue")]
-    if not overdue_items:
+    all_items = data["items"]
+    if not all_items:
         return {"reminders": {}}
     try:
-        reminders = await generate_encouragements(overdue_items)
+        reminders = await generate_encouragements(all_items)
         return {"reminders": reminders}
     except Exception as e:
         logger.error(f"生成鼓励语失败：{e}")
@@ -553,7 +570,7 @@ def toggle_focus_practice(data: dict):
         status_code = 409 if "最多" in result["reason"] else 400
         raise HTTPException(status_code=status_code, detail=result["reason"])
 
-    return {"status": "ok", "count": result["count"], "max_count": result["max_count"]}
+    return {"status": "ok", "count": result["count"], "max_count": result["max_count"], "subject": result.get("subject", "")}
 
 
 @app.post("/api/solution-image")

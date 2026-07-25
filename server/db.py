@@ -358,12 +358,18 @@ def update_image_meta(file_path: str, title: str | None = None,
     conn.close()
 
 
-def get_focus_practice_images() -> list[dict]:
-    """返回所有 is_focus_practice=1 的题目，按 focus_marked_at DESC 排序"""
+def get_focus_practice_images(subject: str | None = None) -> list[dict]:
+    """返回 is_focus_practice=1 的题目，可按学科筛选，按 focus_marked_at DESC 排序"""
     conn = get_db()
-    rows = conn.execute(
-        'SELECT * FROM images WHERE is_focus_practice = 1 ORDER BY focus_marked_at DESC'
-    ).fetchall()
+    if subject:
+        rows = conn.execute(
+            'SELECT * FROM images WHERE is_focus_practice = 1 AND subject = ? ORDER BY focus_marked_at DESC',
+            (subject,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            'SELECT * FROM images WHERE is_focus_practice = 1 ORDER BY focus_marked_at DESC'
+        ).fetchall()
     conn.close()
     result = []
     for r in rows:
@@ -372,6 +378,27 @@ def get_focus_practice_images() -> list[dict]:
         d['solution'] = json.loads(d.get('solution') or '{}')
         result.append(d)
     return result
+
+
+def get_focus_practice_subject_counts() -> list[dict]:
+    """返回每个学科的重点练数量：[{subject, count}, ...]，按学科排序"""
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT subject, COUNT(*) AS cnt FROM images WHERE is_focus_practice = 1 AND subject != "" GROUP BY subject ORDER BY subject'
+    ).fetchall()
+    conn.close()
+    return [{'subject': r['subject'], 'count': r['cnt']} for r in rows]
+
+
+def get_focus_max_per_subject() -> int:
+    """从 config 表获取每学科重点练上限，默认 5"""
+    val = get_config_value("focus_max_per_subject")
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
+    return 5
 
 
 def get_focus_practice_count() -> int:
@@ -387,37 +414,41 @@ def get_focus_practice_count() -> int:
 def set_focus_practice(file_path: str, enabled: bool) -> dict:
     """
     设置/取消重点练标记。
-    返回: {"success": True/False, "reason": str, "count": int, "max_count": 5}
+    返回: {"success": True/False, "reason": str, "count": int, "max_count": int, "subject": str}
     """
     from datetime import datetime
     conn = get_db()
     try:
-        # 检查题目是否存在
+        # 检查题目是否存在，同时获取 subject
         row = conn.execute(
-            'SELECT is_focus_practice FROM images WHERE file_path = ?',
+            'SELECT is_focus_practice, subject FROM images WHERE file_path = ?',
             (file_path,)
         ).fetchone()
         if not row:
-            return {"success": False, "reason": "题目不存在", "count": 0, "max_count": 5}
+            return {"success": False, "reason": "题目不存在", "count": 0, "max_count": 5, "subject": ""}
 
         current = row['is_focus_practice']
+        subject = row['subject'] or '未分类'
+        max_per_subject = get_focus_max_per_subject()
 
         if enabled:
             if current == 1:
                 # 已是重点练，幂等返回
                 count_row = conn.execute(
-                    'SELECT COUNT(*) FROM images WHERE is_focus_practice = 1'
+                    'SELECT COUNT(*) FROM images WHERE is_focus_practice = 1 AND subject = ?',
+                    (subject,)
                 ).fetchone()
                 conn.close()
-                return {"success": True, "reason": "already_set", "count": count_row[0], "max_count": 5}
+                return {"success": True, "reason": "already_set", "count": count_row[0], "max_count": max_per_subject, "subject": subject}
 
-            # 检查数量限制
+            # 检查该学科下的数量限制
             count_row = conn.execute(
-                'SELECT COUNT(*) FROM images WHERE is_focus_practice = 1'
+                'SELECT COUNT(*) FROM images WHERE is_focus_practice = 1 AND subject = ?',
+                (subject,)
             ).fetchone()
-            if count_row[0] >= 5:
+            if count_row[0] >= max_per_subject:
                 conn.close()
-                return {"success": False, "reason": "重点练题目最多只能保留 5 道", "count": count_row[0], "max_count": 5}
+                return {"success": False, "reason": f"{subject} 的重点练题目最多只能保留 {max_per_subject} 道", "count": count_row[0], "max_count": max_per_subject, "subject": subject}
 
             now_str = datetime.now().isoformat(sep=' ', timespec='seconds')
             conn.execute(
@@ -432,13 +463,14 @@ def set_focus_practice(file_path: str, enabled: bool) -> dict:
 
         conn.commit()
         final_count = conn.execute(
-            'SELECT COUNT(*) FROM images WHERE is_focus_practice = 1'
+            'SELECT COUNT(*) FROM images WHERE is_focus_practice = 1 AND subject = ?',
+            (subject,)
         ).fetchone()[0]
         conn.close()
-        return {"success": True, "reason": "", "count": final_count, "max_count": 5}
+        return {"success": True, "reason": "", "count": final_count, "max_count": max_per_subject, "subject": subject}
     except Exception as e:
         conn.close()
-        return {"success": False, "reason": str(e), "count": 0, "max_count": 5}
+        return {"success": False, "reason": str(e), "count": 0, "max_count": 5, "subject": ""}
 
 
 def get_focus_timeout_hours() -> int:
