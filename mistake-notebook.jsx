@@ -1008,8 +1008,8 @@ function StarRating({ value, onChange, readonly = false, size = 18 }) {
 
 const MASTERY_LABELS = {
   mastered: '✅ 已掌握',
-  unfamiliar: '⚠️ 不熟悉',
-  practice: '🔄 继续练习',
+  unfamiliar: '❓ 待攻克',
+  practice: '🔄 勤复习',
 };
 
 function ProblemCard({ problem, imageUrl, onClick, showOverdue }) {
@@ -1155,7 +1155,7 @@ export default function App() {
     }).catch(() => { });
   }, []);
 
-  // Auto-correct activeSubject when subjects load (default to 数学, fallback to first)
+  // Auto-correct activeSubject when subjects load (default to 数学，fallback to first)
   useEffect(() => {
     if (subjects.length === 0) return;
     if (!subjects.some(s => s.name === activeSubject)) {
@@ -1467,7 +1467,7 @@ export default function App() {
     setSaving(true);
     setSaveMsg('');
     try {
-      await API.indexImage(analyzingFile, draft.title || '未命名题目', draft.summary || '', draft.content || '', draft.tags || [], '', '', 0, null, draft.difficulty || 3);
+      await API.indexImage(analyzingFile, draft.title || '未命名题目', draft.summary || '', draft.content || '', draft.tags || [], '', 'unfamiliar', 0, null, draft.difficulty || 3);
       console.log('[保存] 索引保存成功，重新扫描目录');
       setSaveMsg('已保存索引');
       // 记住当前分析的图片所属学科，以便后续跳转
@@ -2237,8 +2237,8 @@ export default function App() {
                           onChange={(e) => setMasteryFilter(e.target.value)} title="按掌握程度筛选">
                           <option value="">全部掌握程度</option>
                           <option value="mastered">已掌握</option>
-                          <option value="unfamiliar">不熟悉</option>
-                          <option value="practice">需练习</option>
+                          <option value="unfamiliar">待攻克</option>
+                          <option value="practice">勤复习</option>
                         </select>
                         <select className="view-type-select" value={dateViewType}
                           onChange={(e) => setDateViewType(e.target.value)} title="日期视图类型">
@@ -2489,8 +2489,8 @@ export default function App() {
                     {[
                       { val: '', label: '未设置' },
                       { val: 'mastered', label: '✅ 已掌握' },
-                      { val: 'unfamiliar', label: '⚠️ 不熟悉' },
-                      { val: 'practice', label: '🔄 继续练习' },
+                      { val: 'unfamiliar', label: '❓ 待攻克' },
+                      { val: 'practice', label: '🔄 勤复习' },
                     ].map((opt) => (
                       <label key={opt.val} className={'mastery-option' + (detailMastery === opt.val ? ' active' : '')}>
                         <input type="radio" name="mastery" value={opt.val}
