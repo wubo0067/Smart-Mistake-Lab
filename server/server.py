@@ -297,6 +297,8 @@ def index_image(data: dict):
 
     subject = _infer_subject(file_path)
     db.mark_indexed(file_path, title, summary, content, tags, notes, mastery, practice_count, last_practiced_at, solution, subject, difficulty)
+    # 首次索引也记录时间线
+    db.log_solution_edit(file_path, 'edit_solution')
     return {"status": "ok"}
 
 
@@ -318,6 +320,9 @@ def update_image(data: dict):
     solution = data.get("solution")
     if isinstance(solution, dict):
         solution = json.dumps(solution, ensure_ascii=False)
+
+    # 每次保存都记录时间线（无论是否修改了解答区域）
+    db.log_solution_edit(file_path, 'edit_solution')
 
     db.update_image_meta(
         file_path,
@@ -471,6 +476,24 @@ def get_all_images(
         "total_count": total_count,
         "filtered_count": len(items),
         "subjects": subjects,
+    }
+
+
+# --- Timeline ---
+
+
+@app.get("/api/timeline")
+def get_timeline(offset: int = Query(0, description="跳过的天数（0 = 最新开始）")):
+    """
+    返回时间线页面，按天分组列出最近编辑解答的题目。
+    offset 控制翻页（跳过 N 天），has_more 指示是否还有更早的数据。
+    """
+    limit = 15  # 每次返回 15 天
+    days, has_more = db.get_timeline_days(offset_days=offset, limit_days=limit)
+    return {
+        "days": days,
+        "has_more": has_more,
+        "offset": offset,
     }
 
 

@@ -86,6 +86,24 @@ def init_db():
         conn.execute('ALTER TABLE images ADD COLUMN focus_marked_at TIMESTAMP')
     except sqlite3.OperationalError:
         pass
+    # 新增 practice_log 表（记录解答编辑的流水日志）
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS practice_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT NOT NULL,
+            action TEXT NOT NULL,
+            created_at TIMESTAMP
+        )
+    ''')
+    # 为 practice_log 建索引
+    try:
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_practice_log_date ON practice_log(created_at)')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_practice_log_file ON practice_log(file_path)')
+    except sqlite3.OperationalError:
+        pass
     # 为 subject 建索引以加速按学科查询
     try:
         conn.execute('CREATE INDEX IF NOT EXISTS idx_images_subject ON images(subject)')
@@ -489,3 +507,105 @@ def delete_image(file_path: str):
     conn.execute('DELETE FROM images WHERE file_path = ?', (file_path,))
     conn.commit()
     conn.close()
+
+
+# --- Practice Log (Timeline) ---
+
+def log_solution_edit(file_path: str, action: str = 'edit_solution'):
+    """
+    记录一次解答编辑日志。
+    action: 'edit_solution' - 解答文字/图片变更（统一记录）
+    """
+    conn = get_db()
+    conn.execute(
+        'INSERT INTO practice_log (file_path, action, created_at) VALUES (?, ?, ?)',
+        (file_path, action, _now())
+    )
+    conn.commit()
+    conn.close()
+
+
+def _get_weekday_cn(date_str: str) -> str:
+    """根据 YYYY-MM-DD 返回中文星期几"""
+    from datetime import datetime
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+        return weekdays[d.weekday()]
+    except (ValueError, IndexError):
+        return ''
+
+
+def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> list[dict]:
+    """
+    按"天"分页，返回每个日期及其包含的练习记录条目。
+    使用单 SQL JOIN 查询，避免 N+1 性能问题。
+    offset_days: 跳过的天数（0 = 最新日期开始）
+    limit_days: 返回的天数
+    """
+    conn = get_db()
+    # 单 SQL JOIN 查询，一次性查出所有日志+图片数据
+    rows = conn.execute('''
+        SELECT
+            date(pl.created_at) AS day,
+            pl.file_path,
+            COUNT(*) AS edit_count,
+            MAX(pl.created_at) AS last_time,
+            img.title, img.subject, img.tags, img.mastery,
+            img.difficulty, img.practice_count, img.solution, img.is_focus_practice
+        FROM practice_log pl
+        LEFT JOIN images img ON img.file_path = pl.file_path
+        GROUP BY day, pl.file_path
+        ORDER BY day DESC, last_time DESC
+    ''').fetchall()
+    conn.close()
+
+    # Python 中按天分组
+    from collections import OrderedDict
+    day_map = OrderedDict()
+    for r in rows:
+        day_str = r['day']
+        # 跳过已被彻底删除的题目
+        if r['title'] is None:
+            continue
+        if day_str not in day_map:
+            day_map[day_str] = []
+        last_time = r['last_time']
+        last_time_display = ''
+        if last_time:
+            try:
+                from datetime import datetime as dt
+                last_time_display = dt.strptime(last_time, "%Y-%m-%d %H:%M:%S").strftime("%H:%M")
+            except Exception:
+                last_time_display = last_time
+        sol_raw = r['solution']
+        sol_str = sol_raw if sol_raw is not None else '{}'
+        day_map[day_str].append({
+            'file_path': r['file_path'],
+            'title': r['title'] or '',
+            'subject': r['subject'] or '',
+            'tags': json.loads(r['tags'] or '[]'),
+            'mastery': r['mastery'] or '',
+            'difficulty': r['difficulty'] or 3,
+            'practice_count': r['practice_count'] or 0,
+            'solution': json.loads(sol_str),
+            'is_focus_practice': r['is_focus_practice'] or 0,
+            'edit_count': r['edit_count'],
+            'last_time': last_time,
+            'last_time_display': last_time_display,
+        })
+
+    all_days = list(day_map.items())
+    has_more = len(all_days) > offset_days + limit_days
+    page_days = all_days[offset_days:offset_days + limit_days]
+
+    result = []
+    for day_str, items in page_days:
+        result.append({
+            'date': day_str,
+            'weekday': _get_weekday_cn(day_str),
+            'count': len(items),
+            'items': items,
+        })
+
+    return result, has_more

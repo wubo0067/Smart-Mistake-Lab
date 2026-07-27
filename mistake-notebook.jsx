@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, Target } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, Target, History } from 'lucide-react';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -95,6 +95,9 @@ const API = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items })
     })).json();
+  },
+  async getTimeline(offset) {
+    return (await apiFetch(`/api/timeline?offset=${offset}`)).json();
   },
   imageUrl(filePath) {
     return `/api/image-file?path=${encodeURIComponent(filePath)}`;
@@ -799,17 +802,10 @@ const CSS = `
   color: var(--accent-1);
   line-height: 1;
 }
-.mnb .focus-count-num.full { color: #ef4444; }
-
-.mnb .focus-count-sep {
-  font-size: 18px;
+.mnb .focus-count-unit {
+  font-size: 14px;
   color: var(--ink-soft);
-}
-
-.mnb .focus-count-max {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--ink-soft);
+  margin-left: 2px;
 }
 
 .mnb .focus-btn {
@@ -877,6 +873,96 @@ const CSS = `
 
 .mnb .card-focus-context .card-body {
   padding-bottom: 8px;
+}
+
+/* ===== Timeline ===== */
+.mnb .timeline-page {
+  position: relative;
+  padding-left: 20px;
+}
+.mnb .timeline-day {
+  position: relative;
+  margin-bottom: 28px;
+}
+.mnb .timeline-day-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  position: relative;
+}
+.mnb .timeline-day-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--paper);
+  box-shadow: 0 0 0 2px var(--accent);
+  flex-shrink: 0;
+  z-index: 1;
+}
+/* 纵向连接线 */
+.mnb .timeline-day::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: 18px;
+  bottom: -10px;
+  width: 2px;
+  background: var(--grid);
+}
+.mnb .timeline-day:last-child::before {
+  display: none;
+}
+.mnb .timeline-day-date {
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.mnb .timeline-day-weekday {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.mnb .timeline-day-count {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-left: auto;
+}
+.mnb .timeline-day-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-left: 20px;
+}
+.mnb .timeline-card-footer {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  margin-top: 6px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.mnb .card-extra-footer {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--grid);
+}
+.mnb .timeline-sentinel {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0;
+}
+.mnb .timeline-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.mnb .timeline-end {
+  font-size: 12px;
+  color: var(--pencil);
 }
 `;
 
@@ -999,7 +1085,7 @@ const MASTERY_LABELS = {
   practice: '🔄 勤复习',
 };
 
-function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, reminderLoading }) {
+function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, reminderLoading, extraFooter }) {
   const isOverdue = showOverdue && problem.is_focus_overdue;
   return (
     <div className={'card' + (isOverdue ? ' card-overdue' : '') + (showOverdue ? ' card-focus-context' : '')} onClick={onClick}>
@@ -1040,6 +1126,7 @@ function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, remind
             <Loader2 size={11} className="spin" /> 生成鼓励语…
           </div>
         )}
+        {extraFooter && <div className="card-extra-footer">{extraFooter}</div>}
       </div>
     </div>
   );
@@ -1106,6 +1193,13 @@ export default function App() {
   const [focusRemindersLoading, setFocusRemindersLoading] = useState(false);
   const [focusMaxPerSubject, setFocusMaxPerSubject] = useState(5);
   const [focusSubjects, setFocusSubjects] = useState([]);
+
+  // --- Timeline state ---
+  const [timelineDays, setTimelineDays] = useState([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineHasMore, setTimelineHasMore] = useState(true);
+  const [timelineOffset, setTimelineOffset] = useState(0);
+  const [timelineLoaded, setTimelineLoaded] = useState(false);
 
   // --- Detail modal ---
   const [detail, setDetail] = useState(null);
@@ -1282,6 +1376,57 @@ export default function App() {
       throw e;
     }
   }
+
+  // --- Timeline ---
+  // 用 ref 做 loading 门控，避免 React StrictMode 双重 effect 导致死锁
+  const timelineGateRef = useRef(false);
+
+  async function loadTimeline(offset) {
+    if (timelineGateRef.current) return;         // 门控：已有请求在飞
+    timelineGateRef.current = true;
+    setTimelineLoading(true);
+    try {
+      const data = await API.getTimeline(offset);
+      if (offset === 0) {
+        setTimelineDays(data.days || []);
+      } else {
+        setTimelineDays((prev) => [...prev, ...(data.days || [])]);
+      }
+      setTimelineHasMore(data.has_more ?? false);
+      setTimelineOffset(offset + (data.days || []).length);
+    } catch (e) {
+      console.error('load timeline failed', e);
+    } finally {
+      timelineGateRef.current = false;
+      setTimelineLoading(false);
+      setTimelineLoaded(true);
+    }
+  }
+
+  // 切换到时间线 tab 时加载第一页
+  useEffect(() => {
+    if (tab !== 'timeline') return;
+    setTimelineDays([]);
+    setTimelineHasMore(true);
+    setTimelineOffset(0);
+    setTimelineLoaded(false);
+    loadTimeline(0);
+  }, [tab]);
+
+  // 无限滚动：IntersectionObserver 监听 sentinel
+  const timelineSentinelRef = useRef(null);
+  useEffect(() => {
+    if (tab !== 'timeline') return;
+    const sentinel = timelineSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && timelineHasMore && !timelineLoading && timelineLoaded) {
+        loadTimeline(timelineOffset);
+      }
+    }, { rootMargin: '400px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [tab, timelineHasMore, timelineLoading, timelineLoaded, timelineOffset]);
 
   // 搜索条件变化时带防抖重新请求后端
   useEffect(() => {
@@ -1555,8 +1700,9 @@ export default function App() {
   // --- Detail pagination derived state (source depends on current tab) ---
   const detailPaginationSource = useMemo(() => {
     if (tab === 'focus') return focusItems;
+    if (tab === 'timeline') return timelineDays.flatMap(d => d.items);
     return flattenedGrouped;
-  }, [tab, focusItems, flattenedGrouped]);
+  }, [tab, focusItems, flattenedGrouped, timelineDays]);
 
   const detailIndex = useMemo(() => {
     if (!detail) return -1;
@@ -1936,6 +2082,9 @@ export default function App() {
             <button className={'tab-btn' + (tab === 'focus' ? ' active' : '')} onClick={() => switchToFocus()}>
               <Target size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
               重点练{/* 重点练数量只在当前 tab 显示，但计数在加载后可获取 */}
+            </button>
+            <button className={'tab-btn' + (tab === 'timeline' ? ' active' : '')} onClick={() => setTab('timeline')}>
+              <History size={14} style={{ marginRight: 4, verticalAlign: -2 }} />时间线
             </button>
             <button className={'tab-btn' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}>
               <Settings size={14} style={{ marginRight: 4, verticalAlign: -2 }} />配置
@@ -2341,9 +2490,8 @@ export default function App() {
                     </p>
                   </div>
                   <div className="focus-count-badge">
-                    <span className={`focus-count-num ${focusCount >= focusMaxPerSubject ? 'full' : ''}`}>{focusCount}</span>
-                    <span className="focus-count-sep">/</span>
-                    <span className="focus-count-max">{focusMaxPerSubject}</span>
+                    <span className="focus-count-num">{focusCount}</span>
+                    <span className="focus-count-unit">道</span>
                   </div>
                 </div>
 
@@ -2398,6 +2546,56 @@ export default function App() {
           );
         })()}
       </div>
+
+      {/* ============ TIMELINE TAB ============ */}
+      {tab === 'timeline' && (
+        <div className="panel">
+          {!timelineLoaded ? (
+            <div className="empty"><Loader2 size={28} className="spin" /><p>加载中…</p></div>
+          ) : timelineDays.length === 0 ? (
+            <div className="empty"><History size={40} /><p>时间线为空</p>
+              <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+                编辑错题的解答后，编辑记录会按时间出现在这里
+              </p>
+            </div>
+          ) : (
+            <div className="timeline-page">
+              {timelineDays.map((day) => (
+                <div key={day.date} className="timeline-day">
+                  <div className="timeline-day-header">
+                    <div className="timeline-day-dot" />
+                    <span className="timeline-day-date">{day.date}</span>
+                    <span className="timeline-day-weekday">{day.weekday}</span>
+                    <span className="timeline-day-count">{day.count} 题</span>
+                  </div>
+                  <div className="timeline-day-items">
+                    {day.items.map((p) => (
+                      <ProblemCard key={p.file_path} problem={p}
+                        imageUrl={API.imageUrl(p.file_path)}
+                        onClick={() => openDetail(p)}
+                        extraFooter={
+                          <div className="timeline-card-footer">
+                            <span>✏️ 编辑 {p.edit_count} 次</span>
+                            {p.last_time_display && <span>· {p.last_time_display}</span>}
+                          </div>
+                        } />
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {/* Sentinel for infinite scroll */}
+              <div ref={timelineSentinelRef} className="timeline-sentinel">
+                {timelineLoading && (
+                  <div className="timeline-loading"><Loader2 size={18} className="spin" /> 加载更多…</div>
+                )}
+                {!timelineHasMore && timelineDays.length > 0 && (
+                  <div className="timeline-end">已加载全部时间线</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ============ DETAIL MODAL ============ */}
       {detail && (
