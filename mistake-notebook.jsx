@@ -879,6 +879,8 @@ const CSS = `
 .mnb .timeline-page {
   position: relative;
   padding-left: 20px;
+  max-width: 860px;
+  margin: 0 auto;
 }
 .mnb .timeline-day {
   position: relative;
@@ -925,9 +927,18 @@ const CSS = `
   color: var(--ink-soft);
 }
 .mnb .timeline-day-count {
-  font-size: 12px;
-  color: var(--ink-soft);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--margin);
   margin-left: auto;
+  font-family: "Songti SC", "STSong", serif;
+  letter-spacing: 0.5px;
+}
+.mnb .timeline-day-count .count-unit {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin-left: 4px;
 }
 .mnb .timeline-day-items {
   display: grid;
@@ -1789,6 +1800,15 @@ export default function App() {
     try {
       await API.deleteImage(filePath);
       setAllIndexed((prev) => prev.filter((p) => p.file_path !== filePath));
+      setFocusItems((prev) => prev.filter((p) => p.file_path !== filePath));
+      setTimelineDays((prev) =>
+        prev
+          .map((day) => ({
+            ...day,
+            items: day.items.filter((p) => p.file_path !== filePath),
+          }))
+          .filter((day) => day.items.length > 0)
+      );
     } catch (e) {
       console.error('delete failed', e);
     }
@@ -1800,6 +1820,15 @@ export default function App() {
     try {
       await API.purgeImage(filePath);
       setAllIndexed((prev) => prev.filter((p) => p.file_path !== filePath));
+      setFocusItems((prev) => prev.filter((p) => p.file_path !== filePath));
+      setTimelineDays((prev) =>
+        prev
+          .map((day) => ({
+            ...day,
+            items: day.items.filter((p) => p.file_path !== filePath),
+          }))
+          .filter((day) => day.items.length > 0)
+      );
       navigateAfterDelete(filePath);
     } catch (e) {
       console.error('purge failed', e);
@@ -1900,6 +1929,12 @@ export default function App() {
       setDetail(updated);
       setAllIndexed((prev) => prev.map((p) => (p.file_path === detail.file_path ? updated : p)));
       setFocusItems((prev) => prev.map((p) => (p.file_path === detail.file_path ? { ...p, ...updated } : p)));
+      setTimelineDays((prev) => prev.map((day) => ({
+        ...day,
+        items: day.items.map((p) =>
+          p.file_path === detail.file_path ? { ...p, ...updated } : p
+        ),
+      })));
       setDetailDirty(false);
     } catch (e) {
       console.error('update failed', e);
@@ -2566,7 +2601,7 @@ export default function App() {
                     <div className="timeline-day-dot" />
                     <span className="timeline-day-date">{day.date}</span>
                     <span className="timeline-day-weekday">{day.weekday}</span>
-                    <span className="timeline-day-count">{day.count} 题</span>
+                    <span className="timeline-day-count">{day.count}<span className="count-unit">题</span></span>
                   </div>
                   <div className="timeline-day-items">
                     {day.items.map((p) => (

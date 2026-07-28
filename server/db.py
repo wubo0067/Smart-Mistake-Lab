@@ -552,7 +552,8 @@ def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> list[dict]:
             COUNT(*) AS edit_count,
             MAX(pl.created_at) AS last_time,
             img.title, img.subject, img.tags, img.mastery,
-            img.difficulty, img.practice_count, img.solution, img.is_focus_practice
+            img.difficulty, img.practice_count, img.solution, img.is_focus_practice,
+            img.notes, img.content, img.summary, img.created_at, img.last_practiced_at
         FROM practice_log pl
         LEFT JOIN images img ON img.file_path = pl.file_path
         GROUP BY day, pl.file_path
@@ -590,6 +591,11 @@ def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> list[dict]:
             'practice_count': r['practice_count'] or 0,
             'solution': json.loads(sol_str),
             'is_focus_practice': r['is_focus_practice'] or 0,
+            'notes': r['notes'] or '',
+            'content': r['content'] or '',
+            'summary': r['summary'] or '',
+            'created_at': r['created_at'] or '',
+            'last_practiced_at': r['last_practiced_at'] or '',
             'edit_count': r['edit_count'],
             'last_time': last_time,
             'last_time_display': last_time_display,
