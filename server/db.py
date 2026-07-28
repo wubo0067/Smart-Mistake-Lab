@@ -580,16 +580,16 @@ def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> list[dict]:
             except Exception:
                 last_time_display = last_time
         sol_raw = r['solution']
-        sol_str = sol_raw if sol_raw is not None else '{}'
+        sol_str = sol_raw if sol_raw else '{}'
         day_map[day_str].append({
             'file_path': r['file_path'],
             'title': r['title'] or '',
             'subject': r['subject'] or '',
-            'tags': json.loads(r['tags'] or '[]'),
+            'tags': json.loads(r['tags']) if r['tags'] and r['tags'].strip() else [],
             'mastery': r['mastery'] or '',
             'difficulty': r['difficulty'] or 3,
             'practice_count': r['practice_count'] or 0,
-            'solution': json.loads(sol_str),
+            'solution': json.loads(sol_str) if sol_str.strip() else {},
             'is_focus_practice': r['is_focus_practice'] or 0,
             'notes': r['notes'] or '',
             'content': r['content'] or '',

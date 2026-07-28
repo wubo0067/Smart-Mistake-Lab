@@ -29,7 +29,7 @@ MATH_KNOWLEDGE_POINTS = [
     "二次函数图像与性质",
     "一次函数与图像",
     "反比例函数",
-    "平行四边形的判定与性质"
+    "平行四边形的判定与性质",
     "矩形的性质与判定",
     "菱形的性质与判定",
     "正方形的性质与判定",
@@ -55,7 +55,7 @@ MATH_KNOWLEDGE_POINTS = [
     "求最值，两定一动，定线段，构造平行四边形",
     "求最值，两定一动，将军饮马",
     "求最值，逆等线段",
-    "求最值，代数题，数形结合"
+    "求最值，代数题，数形结合",
     "垂美四边形",
     "托勒密定理",
     "韦达定理",
@@ -187,28 +187,29 @@ def build_analysis_prompt(subject: str = "") -> str:
     knowledge_points = cfg["knowledge_points"]
 
     if knowledge_points:
-        kp_lines = (
-            f'3. 所有知识点标签**必须严格从**以下候选列表中选取，不得自由发明列表中不存在的知识点：\n'
-            f'[{", ".join(knowledge_points)}]\n'
-            '4. **例外**：仅当你确认该题目涉及的核心考点在候选列表中确实没有匹配项时，最多可补充 1 个你自己推理出的知识点（命名风格必须与候选列表保持一致：简洁、具体、专业，不要过于笼统）。\n'
+        kp_section = (
+            '【候选知识点列表】\n'
+            + '\n'.join(f'- {kp}' for kp in knowledge_points)
+            + '\n\n'
+            '4. 优先从上方候选列表中选取最匹配的知识点。仅当确实没有匹配项时，允许输出「未分类」或自行推理 1 个最贴切的考点（命名风格与候选列表保持一致）。'
         )
     else:
-        kp_lines = (
-            '3. 自己推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。\n'
+        kp_section = (
+            '4. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
         )
 
     return (
-        f'你是一位{role}。请读取图片中的题目文字，并识别题目涉及的知识点。\n'
+        f'你是一位{role}。请读取图片中的题目文字，并识别题目涉及的核心考点。\n'
         '\n'
-        '【规则】\n'
-        '1. 先提取题目中的文字内容，只保留题干、条件、问题本身，不要描述图形，不要补充推理，不要解释。\n'
+        '【步骤】\n'
+        '1. 提取题干文字（仅保留题目本身，忽略图形描述、解题步骤、答案、批改痕迹）。\n'
         '2. 如果图片里同时有图形和文字，只提取可见的题目文字内容，忽略图形关系本身。\n'
-        + kp_lines +
-        '5. 最多给出 5 个知识点，不要过于笼统（避免只写"几何""代数""语法"这种大类）。\n'
+        '3. 从下方【候选知识点列表】中选取 1-4 个最匹配的核心考点，按重要程度排序。\n'
+        + kp_section + '\n'
         '\n'
         '【输出格式】\n'
         '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹：\n'
-        '{"content": "题目文字内容", "tags": ["知识点 1", "知识点 2", "知识点 3"]}'
+        '{"content": "提取的题干文字", "tags": ["知识点1", "知识点2", "知识点3"]}'
     )
 
 
@@ -594,7 +595,7 @@ async def _generate_single_encouragement(
     subject = item.get("subject", "") or ""
     days = round((item.get("inactive_hours", 0) or 0) / 24, 1)
 
-    items_text = f"- 题目: {title if title else '未命名'}\n  学科: {subject if subject else '未分类'}\n  已 {days} 天未练习"
+    items_text = f"- 题目：{title if title else '未命名'}\n  学科：{subject if subject else '未分类'}\n  已 {days} 天未练习"
     prompt = ENCOURAGEMENT_SINGLE_PROMPT + "\n\n" + items_text
 
     headers = {'Content-Type': 'application/json'}

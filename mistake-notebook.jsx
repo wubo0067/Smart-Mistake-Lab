@@ -879,7 +879,7 @@ const CSS = `
 .mnb .timeline-page {
   position: relative;
   padding-left: 20px;
-  max-width: 860px;
+  max-width: 1400px;
   margin: 0 auto;
 }
 .mnb .timeline-day {
@@ -942,8 +942,8 @@ const CSS = `
 }
 .mnb .timeline-day-items {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
   margin-left: 20px;
 }
 .mnb .timeline-card-footer {
