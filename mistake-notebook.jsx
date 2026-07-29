@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, Target, History } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -541,6 +541,62 @@ const CSS = `
   object-fit: contain; display: block;
   border-radius: 6px;
   margin-bottom: 0; border: none;
+}
+
+/* ===== Zoomable image preview (窗口随图片整体缩放) ===== */
+.mnb .image-preview-modal.zoomable {
+  padding: 10px;
+  max-width: none; max-height: none;
+  display: flex; flex-direction: column;
+}
+.mnb .zoom-preview-scroll {
+  overflow: auto;
+  max-width: 92vw;
+  max-height: calc(92vh - 20px);
+  border-radius: 8px;
+  background:
+    repeating-conic-gradient(#f0ede4 0% 25%, #faf8f2 0% 50%) 0 0 / 20px 20px;
+  overscroll-behavior: contain;
+}
+.mnb .zoom-preview-scroll img {
+  display: block;
+  max-width: none; max-height: none;
+  border-radius: 4px;
+  user-select: none;
+  -webkit-user-drag: none;
+  margin: 0; border: none;
+}
+.mnb .zoom-preview-toolbar {
+  position: absolute;
+  left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  padding: 4px 8px;
+  z-index: 5;
+  box-shadow: 0 2px 10px var(--shadow);
+}
+.mnb .zoom-tool-btn {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 28px; padding: 0 6px;
+  border: none; background: none; border-radius: 999px;
+  color: var(--ink); cursor: pointer;
+  transition: background .12s;
+}
+.mnb .zoom-tool-btn:hover { background: var(--grid); }
+.mnb .zoom-tool-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.mnb .zoom-tool-btn:disabled:hover { background: none; }
+.mnb .zoom-tool-label {
+  font-size: 12px; font-weight: 700; color: var(--ink);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  min-width: 48px; text-align: center;
+  cursor: pointer; user-select: none;
+  border-radius: 4px; padding: 2px 0;
+}
+.mnb .zoom-tool-label:hover { background: var(--grid); }
+.mnb .zoom-tool-sep {
+  width: 1px; height: 16px; background: var(--grid); margin: 0 2px;
 }
 
 .mnb .spin { animation: mnbspin 0.9s linear infinite; }
@@ -1138,6 +1194,178 @@ function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, remind
           </div>
         )}
         {extraFooter && <div className="card-extra-footer">{extraFooter}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ============== ZOOMABLE IMAGE PREVIEW ==============
+// 窗口随图片整体缩放：滚轮/按钮改变图片显示尺寸，预览窗口同步变大变小，
+// 超出屏幕时容器内部出现滚动条；双击切换 适应窗口/100%。
+
+function ZoomableImagePreview({ src, alt, onClose }) {
+  const scrollRef = useRef(null);
+  const dialogRef = useRef(null);
+  const prevFocusRef = useRef(null);
+  const [nat, setNat] = useState(null);   // { w, h } 自然尺寸
+  const [scale, setScale] = useState(1);
+  const scaleRef = useRef(1);
+  scaleRef.current = scale;
+  const natRef = useRef(null);
+  natRef.current = nat;
+
+  const ZOOM_MIN = 0.05;
+  const ZOOM_MAX = 10;
+  const ZOOM_STEP = 1.25;
+
+  // 图片加载完成：计算适应屏幕的初始缩放
+  function handleImgLoad(e) {
+    if (natRef.current) return;
+    const w = e.target.naturalWidth || 1;
+    const h = e.target.naturalHeight || 1;
+    setNat({ w, h });
+    const fitScale = computeFitScale(w, h);
+    setScale(fitScale);
+  }
+
+  function computeFitScale(w, h) {
+    const maxW = window.innerWidth * 0.92 - 20;
+    const maxH = window.innerHeight * 0.92 - 20;
+    return Math.min(maxW / w, maxH / h, 1);
+  }
+
+  // 打开时记录焦点、关闭后恢复
+  useEffect(() => {
+    prevFocusRef.current = document.activeElement;
+    dialogRef.current?.focus?.();
+    return () => { prevFocusRef.current?.focus?.(); };
+  }, []);
+
+  // Esc 关闭
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  // 滚轮缩放：保持光标下的图像点不动（调整滚动位置补偿）
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    function onWheel(e) {
+      e.preventDefault();
+      const n = natRef.current;
+      if (!n) return;
+      const oldScale = scaleRef.current;
+      const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldScale * factor));
+      if (newScale === oldScale) return;
+      // 光标相对容器的位置 → 图片坐标
+      const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const ix = (el.scrollLeft + px) / oldScale;  // 图片上的点（自然像素）
+      const iy = (el.scrollTop + py) / oldScale;
+      scaleRef.current = newScale;
+      setScale(newScale);
+      // 缩放后调整滚动条，让该点仍在光标下
+      requestAnimationFrame(() => {
+        el.scrollLeft = ix * newScale - px;
+        el.scrollTop = iy * newScale - py;
+      });
+    }
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [nat]);
+
+  function zoomCentered(target) {
+    const el = scrollRef.current;
+    const n = natRef.current;
+    if (!el || !n) return;
+    const oldScale = scaleRef.current;
+    const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, target));
+    if (newScale === oldScale) return;
+    const cx = el.clientWidth / 2;
+    const cy = el.clientHeight / 2;
+    const ix = (el.scrollLeft + cx) / oldScale;
+    const iy = (el.scrollTop + cy) / oldScale;
+    setScale(newScale);
+    requestAnimationFrame(() => {
+      el.scrollLeft = ix * newScale - cx;
+      el.scrollTop = iy * newScale - cy;
+    });
+  }
+
+  function zoomIn() { zoomCentered(scaleRef.current * ZOOM_STEP); }
+  function zoomOut() { zoomCentered(scaleRef.current / ZOOM_STEP); }
+  function showActual() { zoomCentered(1); }
+  function resetFit() {
+    const n = natRef.current;
+    if (!n) return;
+    setScale(computeFitScale(n.w, n.h));
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) { el.scrollLeft = 0; el.scrollTop = 0; }
+    });
+  }
+
+  function handleDoubleClick() {
+    const n = natRef.current;
+    if (!n) return;
+    const fit = computeFitScale(n.w, n.h);
+    if (Math.abs(scaleRef.current - fit) < 0.01) {
+      showActual();
+    } else {
+      resetFit();
+    }
+  }
+
+  const zoomPercent = Math.round(scale * 100);
+  const fitScale = nat ? computeFitScale(nat.w, nat.h) : 1;
+  const nearFit = Math.abs(scale - fitScale) < 0.01;
+
+  return (
+    <div className="image-preview-overlay" onClick={onClose}>
+      <div className="image-preview-modal zoomable" ref={dialogRef} tabIndex={-1}
+        role="dialog" aria-modal="true" aria-label={alt || '图片预览'}
+        onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} title="关闭 (Esc)"><X size={16} /></button>
+        <div
+          ref={scrollRef}
+          className="zoom-preview-scroll"
+          onDoubleClick={handleDoubleClick}
+          title="滚轮缩放 · 双击切换 适应窗口/原始大小"
+        >
+          <img
+            src={src}
+            alt={alt || '图片预览'}
+            draggable={false}
+            onLoad={handleImgLoad}
+            style={nat ? { width: nat.w * scale, height: nat.h * scale } : { visibility: 'hidden', maxWidth: '92vw', maxHeight: '80vh' }}
+          />
+        </div>
+        <div className="zoom-preview-toolbar">
+          <button className="zoom-tool-btn" onClick={zoomOut}
+            disabled={!nat || scale <= ZOOM_MIN} title="缩小">
+            <ZoomOut size={15} />
+          </button>
+          <span className="zoom-tool-label" onClick={resetFit} title="点击恢复适应窗口">
+            {zoomPercent}%
+          </span>
+          <button className="zoom-tool-btn" onClick={zoomIn}
+            disabled={!nat || scale >= ZOOM_MAX} title="放大">
+            <ZoomIn size={15} />
+          </button>
+          <span className="zoom-tool-sep" />
+          <button className="zoom-tool-btn" onClick={showActual}
+            disabled={!nat || Math.abs(scale - 1) < 0.01} title="原始大小 100%">
+            <span style={{ fontSize: 11, fontWeight: 700 }}>1:1</span>
+          </button>
+          <button className="zoom-tool-btn" onClick={resetFit}
+            disabled={!nat || nearFit} title="适应窗口">
+            <Maximize size={14} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -2365,12 +2593,11 @@ export default function App() {
 
             {/* 扫描页大图预览 */}
             {scanPreviewImage && (
-              <div className="image-preview-overlay" onClick={() => setScanPreviewImage(null)}>
-                <div className="image-preview-modal" onClick={(e) => e.stopPropagation()}>
-                  <button className="scan-preview-close" onClick={() => setScanPreviewImage(null)}><X size={16} /></button>
-                  <img src={API.imageUrl(scanPreviewImage)} alt="原题预览" />
-                </div>
-              </div>
+              <ZoomableImagePreview
+                src={API.imageUrl(scanPreviewImage)}
+                alt="原题预览"
+                onClose={() => setScanPreviewImage(null)}
+              />
             )}
           </div>
         )}
@@ -2904,12 +3131,11 @@ export default function App() {
 
       {/* 解答图片预览 */}
       {previewSolutionImage && (
-        <div className="image-preview-overlay" onClick={() => setPreviewSolutionImage(null)}>
-          <div className="image-preview-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setPreviewSolutionImage(null)}><X size={16} /></button>
-            <img src={API.imageUrl(previewSolutionImage)} alt="解答图片预览" />
-          </div>
-        </div>
+        <ZoomableImagePreview
+          src={API.imageUrl(previewSolutionImage)}
+          alt="解答图片预览"
+          onClose={() => setPreviewSolutionImage(null)}
+        />
       )}
     </div>
   );
