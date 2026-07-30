@@ -297,8 +297,7 @@ def index_image(data: dict):
 
     subject = _infer_subject(file_path)
     db.mark_indexed(file_path, title, summary, content, tags, notes, mastery, practice_count, last_practiced_at, solution, subject, difficulty)
-    # 首次索引也记录时间线
-    db.log_solution_edit(file_path, 'edit_solution')
+    # 扫描加入错题库时不写时间线，仅编辑保存时才记录
     return {"status": "ok"}
 
 
@@ -321,8 +320,10 @@ def update_image(data: dict):
     if isinstance(solution, dict):
         solution = json.dumps(solution, ensure_ascii=False)
 
-    # 每次保存都记录时间线（无论是否修改了解答区域）
-    db.log_solution_edit(file_path, 'edit_solution')
+    # 从错题库或重点练页面打开并编辑保存时，记录时间线
+    # source 可选值：'library'（错题库）、'focus'（重点练）、'timeline'（时间线）
+    if data.get("source") in ("library", "focus"):
+        db.log_solution_edit(file_path, 'edit_solution')
 
     db.update_image_meta(
         file_path,

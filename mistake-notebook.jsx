@@ -53,11 +53,11 @@ const API = {
       body: JSON.stringify({ file_path: filePath, title, summary, content, tags, notes, mastery, practice_count: practiceCount, last_practiced_at: lastPracticedAt, difficulty })
     })).json();
   },
-  async updateImage(filePath, title, summary, content, tags, notes, mastery, practiceCount, lastPracticedAt, solution, difficulty) {
+  async updateImage(filePath, title, summary, content, tags, notes, mastery, practiceCount, lastPracticedAt, solution, difficulty, source) {
     return (await apiFetch('/api/images/update', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_path: filePath, title, summary, content, tags, notes, mastery, practice_count: practiceCount, last_practiced_at: lastPracticedAt, solution, difficulty })
+      body: JSON.stringify({ file_path: filePath, title, summary, content, tags, notes, mastery, practice_count: practiceCount, last_practiced_at: lastPracticedAt, solution, difficulty, source })
     })).json();
   },
   async deleteImage(filePath) {
@@ -1462,6 +1462,8 @@ export default function App() {
   const solutionImagesRef = useRef([]);
   const solutionFileInputRef = useRef(null);
   const solutionTextareaRef = useRef(null);
+  // 记录详情页来源（library/focus/timeline），决定保存时是否写时间线
+  const detailSourceRef = useRef('library');
 
   const [previewSolutionImage, setPreviewSolutionImage] = useState(null);
 
@@ -2003,7 +2005,8 @@ export default function App() {
   }
 
   // --- Detail modal ---
-  function openDetail(p) {
+  function openDetail(p, source = 'library') {
+    detailSourceRef.current = source;
     const sol = (typeof p.solution === 'string' ? JSON.parse(p.solution || '{}') : (p.solution || {}));
     setDetail(p);
     setDetailTagInput('');
@@ -2089,14 +2092,14 @@ export default function App() {
     if (!detail) return;
     if (detailDirty) { setDetailError('当前有未保存修改，请先点击"保存修改"'); return; }
     if (!hasPrev) return;
-    openDetail(prevProblem);
+    openDetail(prevProblem, detailSourceRef.current);
   }
 
   function goToNextProblem() {
     if (!detail) return;
     if (detailDirty) { setDetailError('当前有未保存修改，请先点击"保存修改"'); return; }
     if (!hasNext) return;
-    openDetail(nextProblem);
+    openDetail(nextProblem, detailSourceRef.current);
   }
 
   function navigateAfterDelete(removedFilePath) {
@@ -2104,9 +2107,9 @@ export default function App() {
     setShowDeleteConfirm(false);
     // Prefer next, fallback to prev, else close
     if (hasNext) {
-      openDetail(nextProblem);
+      openDetail(nextProblem, detailSourceRef.current);
     } else if (hasPrev) {
-      openDetail(prevProblem);
+      openDetail(prevProblem, detailSourceRef.current);
     } else {
       setDetail(null);
       setPreviewSolutionImage(null);
@@ -2143,6 +2146,7 @@ export default function App() {
         detail.last_practiced_at,
         solution,
         detailDifficulty,
+        detailSourceRef.current,
       );
       const updated = {
         ...detail,
@@ -2794,7 +2798,7 @@ export default function App() {
                         {groups[subj].map((p) => (
                           <ProblemCard key={p.file_path} problem={p}
                             imageUrl={API.imageUrl(p.file_path)}
-                            onClick={() => openDetail(p)}
+                            onClick={() => openDetail(p, 'focus')}
                             showOverdue={true}
                             reminder={focusReminders[p.file_path]}
                             reminderLoading={focusRemindersLoading} />
@@ -2834,7 +2838,7 @@ export default function App() {
                     {day.items.map((p) => (
                       <ProblemCard key={p.file_path} problem={p}
                         imageUrl={API.imageUrl(p.file_path)}
-                        onClick={() => openDetail(p)}
+                        onClick={() => openDetail(p, 'timeline')}
                         extraFooter={
                           <div className="timeline-card-footer">
                             <span>✏️ 编辑 {p.edit_count} 次</span>
