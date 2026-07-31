@@ -2877,7 +2877,10 @@ export default function App() {
 
             <div className="modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-close" onClick={closeDetailModal}><X size={16} /></div>
-              <img src={API.imageUrl(detail.file_path)} alt={detail.title} />
+              <img src={API.imageUrl(detail.file_path)} alt={detail.title}
+                onDoubleClick={() => setPreviewSolutionImage(detail.file_path)}
+                style={{ cursor: 'zoom-in' }}
+                title="双击查看大图（滚轮缩放）" />
 
               {/* 位置信息 */}
               {detailPositionText && (
