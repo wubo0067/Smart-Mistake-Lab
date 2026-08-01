@@ -552,7 +552,8 @@ const CSS = `
 .mnb .zoom-preview-scroll {
   overflow: auto;
   max-width: 92vw;
-  max-height: calc(92vh - 20px);
+  /* 为底部工具栏预留空间，避免工具栏压在图片上 */
+  max-height: calc(92vh - 70px);
   border-radius: 8px;
   background:
     repeating-conic-gradient(#f0ede4 0% 25%, #faf8f2 0% 50%) 0 0 / 20px 20px;
@@ -567,14 +568,16 @@ const CSS = `
   margin: 0; border: none;
 }
 .mnb .zoom-preview-toolbar {
-  position: absolute;
-  left: 50%; bottom: 18px; transform: translateX(-50%);
+  /* 放在图片滚动区下方，作为常规流布局，不再悬浮遮挡图片 */
+  position: static;
+  flex-shrink: 0;
+  align-self: center;
+  margin-top: 10px;
   display: flex; align-items: center; gap: 4px;
   background: rgba(255, 255, 255, 0.94);
   border: 1.5px solid var(--ink);
   border-radius: 999px;
   padding: 4px 8px;
-  z-index: 5;
   box-shadow: 0 2px 10px var(--shadow);
 }
 .mnb .zoom-tool-btn {
@@ -1229,8 +1232,10 @@ function ZoomableImagePreview({ src, alt, onClose }) {
   }
 
   function computeFitScale(w, h) {
-    const maxW = window.innerWidth * 0.92 - 20;
-    const maxH = window.innerHeight * 0.92 - 20;
+    // 基于滚动容器的实际可视尺寸计算，确保适应窗口时不出现滚动条/溢出
+    const el = scrollRef.current;
+    const maxW = (el ? el.clientWidth : window.innerWidth * 0.92) - 24;
+    const maxH = (el ? el.clientHeight : window.innerHeight * 0.92) - 24;
     return Math.min(maxW / w, maxH / h, 1);
   }
 
