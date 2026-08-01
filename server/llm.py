@@ -209,7 +209,7 @@ def build_analysis_prompt(subject: str = "") -> str:
         '\n'
         '【输出格式】\n'
         '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹：\n'
-        '{"content": "提取的题干文字", "tags": ["知识点1", "知识点2", "知识点3"]}'
+        '{"content": "提取的题干文字", "tags": ["知识点 1", "知识点 2", "知识点 3"]}'
     )
 
 
@@ -231,7 +231,7 @@ class AiConfig:
     def from_env(cls) -> 'AiConfig':
         return cls(
             api_url=os.getenv('AI_API_URL', 'https://api.deepseek.com'),
-            model=os.getenv('AI_MODEL', 'deepseek-v4-pro'),
+            model=os.getenv('AI_MODEL', 'deepseek-v4-flash'),
             api_key=os.getenv('AI_API_KEY', ''),
             timeout=float(os.getenv('AI_TIMEOUT', '120')),
             max_tokens=int(os.getenv('AI_MAX_TOKENS', '4096')),
@@ -246,6 +246,10 @@ def is_anthropic_endpoint(api_url: str) -> bool:
 
 def is_ollama_chat_endpoint(api_url: str) -> bool:
     return bool(re.search(r'/api/chat(?:$|\?)', api_url))
+
+
+def is_deepseek_endpoint(api_url: str) -> bool:
+    return 'deepseek.com' in api_url.lower()
 
 
 def is_probably_ollama_base_url(api_url: str) -> bool:
@@ -314,6 +318,24 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
     headers = {'Content-Type': 'application/json'}
     if config.api_key:
         headers['Authorization'] = f'Bearer {config.api_key}'
+
+    if is_deepseek_endpoint(api_url):
+        # DeepSeek 当前兼容接口不接受 image_url，这里回退为纯文本消息以避免请求体校验失败。
+        return {
+            'headers': headers,
+            'body': {
+                'model': config.model,
+                'max_tokens': config.max_tokens,
+                'messages': [{
+                    'role': 'user',
+                    'content': [
+                        {'type': 'text', 'text': prompt},
+                        {'type': 'text', 'text': f'图片数据（data URI）：\n{image_data_uri}'},
+                    ]
+                }],
+            },
+        }
+
     return {
         'headers': headers,
         'body': {
