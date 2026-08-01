@@ -1830,7 +1830,7 @@ export default function App() {
       console.log('[Analysis] server result:', result);
       setDraft({
         title: '',
-        summary: '',
+        summary: result.summary || '',
         content: result.content || '',
         tags: Array.isArray(result.tags) ? result.tags : [],
         difficulty: 3

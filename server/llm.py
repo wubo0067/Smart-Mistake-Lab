@@ -111,7 +111,7 @@ PHYSICS_KNOWLEDGE_POINTS = [
     "热值", "内能与热机", "电流与电路", "欧姆定律",
     "电阻的串并联", "电功与电功率", "焦耳定律", "家庭电路",
     "磁场与电流的磁场", "电磁感应", "速度与平均速度", "声音的产生与传播",
-    "浮力，融化，密度大于就升，密度小于就降，密度相等就不变",
+    "浮力，融化，密度大于就升，密度小于就降，密度相等就不变","摩擦起电的实质是电荷（电子）的转移","带电体具有吸引轻小物体的性质","验电器的工作原理：同种电荷相互排斥。"
 ]
 
 CHEMISTRY_KNOWLEDGE_POINTS = [
@@ -206,10 +206,11 @@ def build_analysis_prompt(subject: str = "") -> str:
         '2. 如果图片里同时有图形和文字，只提取可见的题目文字内容，忽略图形关系本身。\n'
         '3. 从下方【候选知识点列表】中选取 1-4 个最匹配的核心考点，按重要程度排序。\n'
         + kp_section + '\n'
+        '5. 给出简要的解题思路：概括解题的关键步骤、方法或切入点，50-100 字，通俗易懂。\n'
         '\n'
         '【输出格式】\n'
         '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹：\n'
-        '{"content": "提取的题干文字", "tags": ["知识点 1", "知识点 2", "知识点 3"]}'
+        '{"content": "提取的题干文字", "summary": "简要解题思路", "tags": ["知识点 1", "知识点 2", "知识点 3"]}'
     )
 
 
@@ -414,14 +415,16 @@ def parse_analysis_result(raw_text: str) -> dict:
         if parsed is None:
             raise
     content = ''
+    summary = ''
     if isinstance(parsed, list):
         tags = parsed
     elif isinstance(parsed, dict):
         tags = parsed.get('tags') if isinstance(parsed.get('tags'), list) else []
         content = parsed.get('content', '') if isinstance(parsed.get('content'), str) else ''
+        summary = parsed.get('summary', '') if isinstance(parsed.get('summary'), str) else ''
     else:
         tags = []
-    return {'content': content.strip(), 'tags': tags}
+    return {'content': content.strip(), 'summary': summary.strip(), 'tags': tags}
 
 
 # ============== 核心分析函数 ==============
@@ -440,7 +443,7 @@ async def analyze_image(
         subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
 
     Returns:
-        {'title': str, 'summary': str, 'tags': list[str]}
+        {'content': str, 'summary': str, 'tags': list[str]}
 
     Raises:
         FileNotFoundError: 图片文件不存在
