@@ -466,7 +466,7 @@ Smart-Mistake-Lab/
 2. **命名规范** — 图片文件名可包含日期或简短描述，便于搜索：
    ```
    2025-01-15_三角形的中线定理.jpg
-   20250115_求导_难度5.png
+   20250115_求导_难度 5.png
    ```
 
 3. **定期整理** — 每月检查一次待索引图片，及时将新题目加入数据库
@@ -659,7 +659,7 @@ uv run python server.py
 ## 📞 联系方式与反馈
 
 - 提交 Issue 或 PR：[GitHub Repository](https://github.com/your-repo)
-- 反馈邮箱：your-email@example.com
+- 反馈邮箱：wubo0067@hotmail.com
 
 ---
 
