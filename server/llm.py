@@ -314,10 +314,11 @@ def build_analysis_prompt(subject: str = "") -> str:
         '3. 从下方【候选知识点列表】中选取 1-4 个最匹配的核心考点，按重要程度排序。\n'
         + kp_section + '\n'
         '5. 给出简要的解题思路：概括解题的关键步骤、方法或切入点，50-100 字，通俗易懂。\n'
+        '6. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n'
         '\n'
         '【输出格式】\n'
         '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹：\n'
-        '{"content": "提取的题干文字", "summary": "简要解题思路", "tags": ["知识点 1", "知识点 2", "知识点 3"]}'
+        '{"content": "提取的题干文字", "summary": "简要解题思路", "tags": ["知识点 1", "知识点 2", "知识点 3"], "difficulty": 3}'
     )
 
 
@@ -523,15 +524,29 @@ def parse_analysis_result(raw_text: str) -> dict:
             raise
     content = ''
     summary = ''
+    difficulty = 3
     if isinstance(parsed, list):
         tags = parsed
     elif isinstance(parsed, dict):
         tags = parsed.get('tags') if isinstance(parsed.get('tags'), list) else []
         content = parsed.get('content', '') if isinstance(parsed.get('content'), str) else ''
         summary = parsed.get('summary', '') if isinstance(parsed.get('summary'), str) else ''
+        raw_difficulty = parsed.get('difficulty')
+        if isinstance(raw_difficulty, bool):
+            difficulty = 3
+        elif isinstance(raw_difficulty, (int, float)):
+            difficulty = int(raw_difficulty)
+        elif isinstance(raw_difficulty, str):
+            m = re.search(r'(\d+)', raw_difficulty)
+            if m:
+                difficulty = int(m.group(1))
+        if difficulty < 1:
+            difficulty = 1
+        elif difficulty > 5:
+            difficulty = 5
     else:
         tags = []
-    return {'content': content.strip(), 'summary': summary.strip(), 'tags': tags}
+    return {'content': content.strip(), 'summary': summary.strip(), 'tags': tags, 'difficulty': difficulty}
 
 
 # ============== 核心分析函数 ==============

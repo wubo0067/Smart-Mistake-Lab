@@ -1851,12 +1851,15 @@ export default function App() {
 
       const result = await resp.json();
       console.log('[Analysis] server result:', result);
+      // AI 判断的难度（1-5 星），无效则回退默认 3 星
+      const d = Number(result.difficulty);
+      const aiDifficulty = Number.isInteger(d) && d >= 1 && d <= 5 ? d : 3;
       setDraft({
         title: '',
         summary: result.summary || '',
         content: result.content || '',
         tags: Array.isArray(result.tags) ? result.tags : [],
-        difficulty: 3
+        difficulty: aiDifficulty
       });
       console.groupEnd();
     } catch (e) {
@@ -2230,6 +2233,9 @@ export default function App() {
           // 解题思路（summary）直接覆盖更新
           summary: result.summary || prev.summary,
         };
+        // AI 重新判断的难度（1-5 星），无效则保持原值
+        const d = Number(result.difficulty);
+        if (Number.isInteger(d) && d >= 1 && d <= 5) updates.difficulty = d;
         // 题目内容仅在当前为空时填充，避免覆盖用户手动修正的文字
         if (!prev.content) updates.content = result.content || '';
         return { ...prev, ...updates };
