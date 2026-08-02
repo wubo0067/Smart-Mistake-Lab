@@ -338,7 +338,13 @@ const CSS = `
 
 /* Library */
 .mnb .library-toolbar {
-  display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px;
+  display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+  /* 吸顶：滚动页面时搜索/筛选栏固定在上方，仅错题列表滚动 */
+  position: sticky; top: 0; z-index: 20;
+  background: var(--card);
+  padding: 4px 0 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--grid);
 }
 .mnb .search-box {
   display: flex; align-items: center; gap: 6px;
