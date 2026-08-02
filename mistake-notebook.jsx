@@ -479,7 +479,22 @@ const CSS = `
   font-family: "Songti SC", "STSong", serif;
   font-size: 19px; margin: 0 0 10px; padding-right: 30px;
 }
-.mnb .modal .summary { font-size: 13.5px; line-height: 1.7; color: var(--ink-soft); margin-bottom: 14px; }
+.mnb .modal .summary {
+  font-size: 13.5px; line-height: 1.7;
+  color: #6ea8fe; /* 淡蓝色：AI 分析的解题思路 */
+  margin-bottom: 14px;
+}
+.mnb .modal .summary .ai-badge {
+  display: inline-block;
+  font-size: 11px; font-weight: 600;
+  color: #6ea8fe;
+  background: rgba(110, 168, 254, 0.12);
+  border: 1px solid rgba(110, 168, 254, 0.35);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-right: 8px;
+  vertical-align: 1px;
+}
 .mnb .timestamp-row {
   display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px;
 }
@@ -1451,6 +1466,9 @@ export default function App() {
   const [detailSaving, setDetailSaving] = useState(false);
   const [detailError, setDetailError] = useState(null);
   const [detailDirty, setDetailDirty] = useState(false);
+  // 详情页 AI 重新分析
+  const [detailAnalyzing, setDetailAnalyzing] = useState(false);
+  const [detailAnalyzeMsg, setDetailAnalyzeMsg] = useState(null);
   const titleSavingRef = useRef(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState('');
@@ -2017,6 +2035,8 @@ export default function App() {
     setDetailTagInput('');
     setDetailError(null);
     setDetailDirty(false);
+    setDetailAnalyzing(false);
+    setDetailAnalyzeMsg(null);
     setEditingTitle(false);
     setEditTitleValue(p.title || '');
     setDetailNotes(p.notes || '');
@@ -2173,11 +2193,58 @@ export default function App() {
         ),
       })));
       setDetailDirty(false);
+      setDetailAnalyzeMsg(null);
     } catch (e) {
       console.error('update failed', e);
       setDetailError('保存失败 ' + (e.message || '未知错误'));
     } finally {
       setDetailSaving(false);
+    }
+  }
+
+  // --- AI 重新分析（详情弹窗） ---
+  async function reanalyzeDetail() {
+    if (!detail || detailAnalyzing) return;
+    setDetailAnalyzing(true);
+    setDetailAnalyzeMsg(null);
+    setDetailError(null);
+    try {
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: detail.file_path })
+      });
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.detail || `HTTP ${resp.status}`);
+      }
+      const result = await resp.json();
+      // 合并标签：保留已有标签，仅把 AI 新识别出的标签追加进去（不覆盖、不重复）
+      setDetail((prev) => {
+        const existingTags = prev.tags || [];
+        const incomingTags = Array.isArray(result.tags) ? result.tags : [];
+        const seen = new Set(existingTags);
+        const newTags = incomingTags.filter((t) => !seen.has(t));
+        const updates = {
+          tags: [...existingTags, ...newTags],
+          // 解题思路（summary）直接覆盖更新
+          summary: result.summary || prev.summary,
+        };
+        // 题目内容仅在当前为空时填充，避免覆盖用户手动修正的文字
+        if (!prev.content) updates.content = result.content || '';
+        return { ...prev, ...updates };
+      });
+      setDetailDirty(true);
+      const added = (Array.isArray(result.tags) ? result.tags : [])
+        .filter((t) => !((detail.tags || []).includes(t)));
+      setDetailAnalyzeMsg(added.length > 0
+        ? `AI 重新分析完成：新增 ${added.length} 个标签，解题思路已更新。请点击「保存修改」生效。`
+        : 'AI 重新分析完成：解题思路已更新，无新增标签。请点击「保存修改」生效。');
+    } catch (e) {
+      console.error('[ReAnalyze] failed:', e);
+      setDetailError('AI 重新分析失败：' + (e.message || '未知错误'));
+    } finally {
+      setDetailAnalyzing(false);
     }
   }
 
@@ -2914,7 +2981,16 @@ export default function App() {
                 </h2>
               )}
 
-              <div className="summary">{detail.summary}</div>
+              {detail.summary ? (
+                <div className="summary">
+                  <span className="ai-badge">AI 思路</span>
+                  {detail.summary}
+                </div>
+              ) : (
+                <div className="summary" style={{ color: 'var(--pencil)', opacity: 0.8 }}>
+                  暂无 AI 解题思路，可在下方点击「AI 重新分析」生成
+                </div>
+              )}
 
               <div className="field" style={{ marginBottom: 14 }}>
                 <label className="field-label">题目内容</label>
@@ -3032,9 +3108,16 @@ export default function App() {
 
               {detailError && <div className="save-msg error" style={{ marginTop: -10, marginBottom: 12 }}>{detailError}</div>}
               {detailSaving && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>保存中…</div>}
+              {detailAnalyzeMsg && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>{detailAnalyzeMsg}</div>}
               <div className="modal-actions">
                 <button className="save-btn" style={{ marginTop: 0 }} onClick={saveDetail} disabled={detailSaving || !detailDirty}>
                   {detailSaving ? '保存中…' : '保存修改'}
+                </button>
+                <button className="save-btn secondary" style={{ marginTop: 0 }}
+                  onClick={reanalyzeDetail} disabled={detailAnalyzing || detailSaving}
+                  title="调用 AI 重新识别题目，标签将与已有标签合并，解题思路将被更新">
+                  {detailAnalyzing ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+                  {detailAnalyzing ? 'AI 分析中…' : 'AI 重新分析'}
                 </button>
                 <button className={'focus-btn' + (detail.is_focus_practice === 1 ? ' active' : '')}
                   style={{ marginTop: 0 }}
