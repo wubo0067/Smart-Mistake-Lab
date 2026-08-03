@@ -2228,6 +2228,12 @@ export default function App() {
         throw new Error(errData.detail || `HTTP ${resp.status}`);
       }
       const result = await resp.json();
+      // 题目内容（content）：更新到「题目内容」编辑框中
+      const newContent = result.content || '';
+      if (newContent) {
+        setDetailContent(newContent);
+        detailContentRef.current = newContent;
+      }
       // 合并标签：保留已有标签，仅把 AI 新识别出的标签追加进去（不覆盖、不重复）
       setDetail((prev) => {
         const existingTags = prev.tags || [];
@@ -2238,20 +2244,20 @@ export default function App() {
           tags: [...existingTags, ...newTags],
           // 解题思路（summary）直接覆盖更新
           summary: result.summary || prev.summary,
+          // 题目内容更新为 AI 提取的完整内容
+          content: newContent || prev.content,
         };
         // AI 重新判断的难度（1-5 星），无效则保持原值
         const d = Number(result.difficulty);
         if (Number.isInteger(d) && d >= 1 && d <= 5) updates.difficulty = d;
-        // 题目内容仅在当前为空时填充，避免覆盖用户手动修正的文字
-        if (!prev.content) updates.content = result.content || '';
         return { ...prev, ...updates };
       });
       setDetailDirty(true);
       const added = (Array.isArray(result.tags) ? result.tags : [])
         .filter((t) => !((detail.tags || []).includes(t)));
       setDetailAnalyzeMsg(added.length > 0
-        ? `AI 重新分析完成：新增 ${added.length} 个标签，解题思路已更新。请点击「保存修改」生效。`
-        : 'AI 重新分析完成：解题思路已更新，无新增标签。请点击「保存修改」生效。');
+        ? `AI 重新分析完成：新增 ${added.length} 个标签，解题思路与题目内容已更新。请点击「保存修改」生效。`
+        : 'AI 重新分析完成：解题思路与题目内容已更新，无新增标签。请点击「保存修改」生效。');
     } catch (e) {
       console.error('[ReAnalyze] failed:', e);
       setDetailError('AI 重新分析失败：' + (e.message || '未知错误'));
@@ -2565,10 +2571,10 @@ export default function App() {
                           placeholder="题目的文字描述，方便以后搜索" />
                       </div>
                       <div className="field">
-                        <label className="field-label">题目内容</label>
+                        <label className="field-label">AI提取题目内容</label>
                         <textarea rows={6} value={draft.content}
                           onChange={(e) => setDraft({ ...draft, content: e.target.value })}
-                          placeholder="AI 从图片中提取的题目文字内容，可手动修正" />
+                          placeholder="AI 从图片中提取的题目内容，可手动修正" />
                       </div>
                       <div className="field">
                         <label className="field-label">难度评分</label>
@@ -3005,11 +3011,11 @@ export default function App() {
               )}
 
               <div className="field" style={{ marginBottom: 14 }}>
-                <label className="field-label">题目内容</label>
+                <label className="field-label">AI提取题目内容</label>
                 <textarea rows={6} value={detailContent}
                   onChange={(e) => { setDetailContent(e.target.value); detailContentRef.current = e.target.value; }}
                   onBlur={saveDetailContent}
-                  placeholder="题目文字内容" />
+                  placeholder="AI 从图片中提取的题目内容，可手动修正" />
               </div>
 
               {/* 时间信息 */}

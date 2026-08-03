@@ -541,8 +541,8 @@ DEFAULT_SUBJECT_CONFIG = {
 }
 
 
-def build_analysis_prompt(subject: str = "") -> str:
-    """根据学科构建分析 prompt"""
+def build_analysis_prompt(subject: str = "", content: str = "") -> str:
+    """根据学科和题目内容构建分析 prompt"""
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
     role = cfg["role"]
     knowledge_points = cfg["knowledge_points"]
@@ -552,28 +552,85 @@ def build_analysis_prompt(subject: str = "") -> str:
             '【候选知识点列表】\n'
             + '\n'.join(f'- {kp}' for kp in knowledge_points)
             + '\n\n'
-            '4. 优先从上方候选列表中选取解题过程中最匹配的知识点。仅当确实没有匹配项时，允许输出「未分类」或自行推理 1 个最贴切的考点（命名风格与候选列表保持一致）。'
+            '2. 从上方【候选知识点列表】中选取 1-4 个最匹配的核心考点，按重要程度排序，优先选取解题过程中最匹配的知识点。仅当确实没有匹配项时，允许输出「未分类」或自行推理 1 个最贴切的考点（命名风格与候选列表保持一致）。'
         )
     else:
         kp_section = (
-            '4. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
+            '2. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
         )
 
     return (
-        f'你是一位{role}。请读取图片中的题目文字，并识别题目涉及的核心考点。\n'
+        f'你是一位{role}。请根据下方提供的【题目内容】，先做严谨审题，再识别题目涉及的核心考点。\n'
+        '\n'
+        '【题目内容】\n'
+        f'{content}\n'
         '\n'
         '【步骤】\n'
-        '1. 提取题干文字（仅保留题目本身，忽略图形描述、解题步骤、答案、批改痕迹）。\n'
-        '2. 如果图片里同时有图形和文字，只提取可见的题目文字内容，忽略图形关系本身。\n'
-        '3. 从下方【候选知识点列表】中选取 1-4 个最匹配的核心考点，按重要程度排序。\n'
-        + kp_section + '\n'
-        '5. 给出简要的解题思路：概括解题的关键步骤、方法或切入点，50-100 字，通俗易懂。\n'
+        '1. 先以【题目文本】为最高优先级审题，逐句识别题目的实验/推理顺序、每一步的初始状态、过程变化和最终比较对象。若【已知条件与约束】中的概括与【题目文本】冲突，必须以【题目文本】为准，不得沿用错误概括。\n'
+        '2. 对连续过程题、多步实验题、先后变化题，必须特别检查后一步是否建立在前一步结果之上。不要把“同一对象的连续变化”误判为“多个彼此独立且初始状态相同的过程”，也不要默认系统会在步骤之间自动复原。\n'
+        '3. 先判断题目的关键结论或比较结果，再提炼考点；若是选择题，要先在心里确定正确选项依据，再生成 summary。\n'
+        + kp_section.replace('2. ', '4. ', 1) + '\n'
+        '5. 给出简要的解题思路：概括关键判断链条、核心物理/数学关系，并明确写出最终比较结论或选项倾向，50-120 字，通俗易懂，但不要编造题目中没有的条件。\n'
         '6. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n'
         '\n'
         '【输出格式】\n'
         '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹：\n'
-        '{"content": "提取的题干文字", "summary": "结合学科的知识点来给出简要解题思路", "tags": ["知识点 1", "知识点 2", "知识点 3"], "difficulty": 3}'
+        '{"content": "与上方【题目内容】一致", "summary": "先点明关键判断依据，再说明最终结论或判断方向", "tags": ["知识点 1", "知识点 2", "知识点 3"], "difficulty": 3}'
     )
+
+
+# ============== 题目内容提取 Prompt ==============
+
+PROBLEM_EXTRACTION_PROMPT = """# Role: 题目结构化解构专家 (Problem Deconstruction Expert)
+
+## Task:
+请深度分析上传的图片，高质量提取其中的完整题目内容。你的目标是直接输出结构化、可读性强、信息完整的题目内容，确保图片中的文字信息、图形语义和解题任务都不丢失。
+
+## Workflow:
+
+### Step 1: 文本提取 (Textual Extraction)
+精确转录图片中的所有文字内容。
+- 使用 LaTeX 格式处理所有的数学公式、物理符号和单位（例如：使用 $\\sqrt{3}$ 而不是 √3）。
+- 确保编号（如【例 17】）和标点符号完整无误。
+- 对表示顺序、条件变化、比较对象、范围限制的关键词必须原样保留，不要改写题意，不要把局部条件扩写成全局条件。
+
+### Step 2: 视觉语义解构 (Visual Semantic Analysis)
+这是最关键的一步。请忽略文字，单纯从图像的几何/物理逻辑角度描述图形：
+- **对象识别**：图中出现了哪些物体？（例如：矩形、金属球、容器、细线）。
+- **空间关系**：物体之间的位置关系是什么？（例如："球在盒内"、"盒子处于水面上方"、"点 A 在点 B 的右侧"）。
+- **状态描述**：图示展示了什么物理/数学状态？（例如："完全浸没"、"漂浮"、"平移后的重叠状态"、"受力平衡状态"）。
+- **标注关联**：图形中的字母标签（如 A, B, C, D'）分别对应哪些几何特征或物理实体。
+
+### Step 3: 整合输出最终题目内容 (Final Structured Problem Content)
+请将上述两步的内容按照以下结构，整合成最终输出：
+
+---
+**【场景描述/图形解构】**
+(在此处填入 Step 2 的分析结果。请用逻辑严密、空间感强的语言描述，确保读者不看图也能理解图形与物理/几何关系。)
+
+**【题目文本】**
+(在此处填入 Step 1 的完整转录内容。)
+
+**【求解任务】**
+(根据题目要求，总结出需要解决的具体问题列表。若题目有多问，请分点列出。)
+
+**【已知条件与约束】**
+(只提取题目中明确给出、或由图形/位置关系可以直接读出的约束。不要补充解题阶段才成立的推论，不要擅自加入未明确给出的理想化前提或隐含设定。若题目是连续过程、多步实验或分阶段变化题，必须明确写出后一步是否承接前一步状态变化。)
+---
+
+## Output Requirement:
+请直接输出整理后的题目内容本身，不要补写图片中不存在的信息。
+输出必须严格按照以下四个板块顺序组织：
+1. 【场景描述/图形解构】
+2. 【题目文本】
+3. 【求解任务】
+4. 【已知条件与约束】
+
+额外约束：
+- 如果原题没有明确说某个理想条件、忽略项、默认设定或等价关系，不得自行补充。
+- 如果题目描述的是同一对象在不同阶段的连续变化，必须保留其时间顺序与状态承接关系，不得改写成多个独立且初始条件相同的过程。
+- 如果题目包含多步实验、分类讨论或先后过程，请在输出中明确呈现各步骤的先后关系、对象变化和比较基准，避免遗漏或改写关键条件。
+"""
 
 
 # 保留旧变量以兼容可能的引用
@@ -803,35 +860,31 @@ def parse_analysis_result(raw_text: str) -> dict:
     return {'content': content.strip(), 'summary': summary.strip(), 'tags': tags, 'difficulty': difficulty}
 
 
+def parse_extraction_result(raw_text: str) -> str:
+    """解析题目内容提取结果，返回 content 文本"""
+    cleaned = raw_text.strip()
+    cleaned = re.sub(r'^```\s*', '', cleaned)
+    cleaned = re.sub(r'```\s*$', '', cleaned)
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return ''
+    # 兼容部分模型用 JSON 包装返回的情况
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            for key in ('content', 'prompt', 'text'):
+                value = parsed.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    except json.JSONDecodeError:
+        pass
+    return cleaned
+
+
 # ============== 核心分析函数 ==============
 
-async def analyze_image(
-    image_path: str,
-    config: Optional[AiConfig] = None,
-    subject: str = "",
-) -> dict:
-    """
-    分析错题图片，返回 {title, summary, tags}。
-
-    Args:
-        image_path: 图片文件的绝对路径
-        config: AI 配置，若为 None 则从环境变量读取
-        subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
-
-    Returns:
-        {'content': str, 'summary': str, 'tags': list[str]}
-
-    Raises:
-        FileNotFoundError: 图片文件不存在
-        ValueError: AI 配置无效
-        RuntimeError: AI 调用失败
-    """
-    if config is None:
-        config = AiConfig.from_env()
-
-    logger.info(f'[LLM] 开始分析图片：{image_path}')
-
-    # 1. 读取图片并转 base64
+def _encode_image(image_path: str) -> tuple[str, str]:
+    """读取图片并返回 (image_base64, data_uri)"""
     if not os.path.isfile(image_path):
         raise FileNotFoundError(f'图片文件不存在：{image_path}')
 
@@ -839,29 +892,19 @@ async def analyze_image(
         image_data = f.read()
     image_base64 = base64.b64encode(image_data).decode('utf-8')
 
-    # 判断图片类型
     ext = os.path.splitext(image_path)[1].lower()
     mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
     mime_type = mime_map.get(ext, 'image/jpeg')
     data_uri = f'data:{mime_type};base64,{image_base64}'
 
     logger.info(f'[LLM] 图片已编码，大小：{len(image_data)} bytes, MIME: {mime_type}')
+    return image_base64, data_uri
 
-    # 2. 校验配置
-    api_url = normalize_api_url(config.api_url)
-    if not api_url or not config.model.strip():
-        raise ValueError('AI 配置不完整：请设置 API URL 和模型名')
 
-    if should_require_api_key(api_url) and not config.api_key:
-        raise ValueError('该端点需要 API Key')
-
-    logger.info(f'[LLM] 调用 AI API: url={api_url}, model={config.model}')
-
-    # 3. 构建请求
-    prompt = build_analysis_prompt(subject)
+async def _call_ai(config: AiConfig, api_url: str, data_uri: str, image_base64: str, prompt: str) -> str:
+    """构建请求并调用 AI，返回响应文本"""
     request = build_analyze_request(config, api_url, data_uri, image_base64, prompt)
 
-    # 4. 调用 AI
     async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout), trust_env=False) as client:
         resp = await client.post(api_url, headers=request['headers'], json=request['body'])
 
@@ -879,7 +922,6 @@ async def analyze_image(
         logger.error(f'[LLM] AI 调用失败：{err_detail}')
         raise RuntimeError(format_ai_error(err_detail))
 
-    # 5. 解析响应
     data = resp.json()
     response_text = extract_text_from_response(data, api_url)
     if not response_text:
@@ -887,15 +929,103 @@ async def analyze_image(
         raise RuntimeError('AI 未返回文本内容，请检查模型名称')
 
     logger.info(f'[LLM] AI 返回文本长度：{len(response_text)}')
+    return response_text
 
-    # 6. 解析 JSON 结果
+
+async def extract_problem_content(
+    image_path: str,
+    config: Optional[AiConfig] = None,
+) -> str:
+    """
+    从错题图片中提取完整的题目内容（自包含推理提示词）。
+
+    Args:
+        image_path: 图片文件的绝对路径
+        config: AI 配置，若为 None 则从环境变量读取
+
+    Returns:
+        str: 提取的题目内容（可直接复制的 Generated Prompt）
+
+    Raises:
+        FileNotFoundError: 图片文件不存在
+        ValueError: AI 配置无效
+        RuntimeError: AI 调用失败
+    """
+    if config is None:
+        config = AiConfig.from_env()
+
+    logger.info(f'[LLM] 开始提取图片题目内容：{image_path}')
+
+    image_base64, data_uri = _encode_image(image_path)
+
+    api_url = normalize_api_url(config.api_url)
+    if not api_url or not config.model.strip():
+        raise ValueError('AI 配置不完整：请设置 API URL 和模型名')
+    if should_require_api_key(api_url) and not config.api_key:
+        raise ValueError('该端点需要 API Key')
+
+    logger.info(f'[LLM] 调用 AI API（提取题目内容）: url={api_url}, model={config.model}')
+    response_text = await _call_ai(config, api_url, data_uri, image_base64, PROBLEM_EXTRACTION_PROMPT)
+    return parse_extraction_result(response_text)
+
+
+async def analyze_image(
+    image_path: str,
+    config: Optional[AiConfig] = None,
+    subject: str = "",
+) -> dict:
+    """
+    分析错题图片，返回 {content, summary, tags, difficulty}。
+
+    Args:
+        image_path: 图片文件的绝对路径
+        config: AI 配置，若为 None 则从环境变量读取
+        subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
+
+    Returns:
+        {'content': str, 'summary': str, 'tags': list[str], 'difficulty': int}
+
+    Raises:
+        FileNotFoundError: 图片文件不存在
+        ValueError: AI 配置无效
+        RuntimeError: AI 调用失败
+    """
+    if config is None:
+        config = AiConfig.from_env()
+
+    logger.info(f'[LLM] 开始分析图片：{image_path}')
+
+    image_base64, data_uri = _encode_image(image_path)
+
+    api_url = normalize_api_url(config.api_url)
+    if not api_url or not config.model.strip():
+        raise ValueError('AI 配置不完整：请设置 API URL 和模型名')
+    if should_require_api_key(api_url) and not config.api_key:
+        raise ValueError('该端点需要 API Key')
+
+    # 1. 提取完整题目内容
+    content = await extract_problem_content(image_path, config)
+    # log 记录 content 全部内容
+    logger.info(f'[LLM] 题目内容：{content if len(content) < 100 else content[:100] }')
+
+    # 2. 基于题目内容构建分析 prompt 并调用 AI
+    logger.info(f'[LLM] 调用 AI API: url={api_url}, model={config.model}')
+    prompt = build_analysis_prompt(subject, content)
+    response_text = await _call_ai(config, api_url, data_uri, image_base64, prompt)
+
+    # 3. 解析 JSON 结果
     try:
         result = parse_analysis_result(response_text)
-        logger.info(f'[LLM] 解析成功：tags={result["tags"]}')
-        return result
     except json.JSONDecodeError as e:
         logger.error(f'[LLM] JSON 解析失败：{e}, raw={response_text[:300]}')
         raise RuntimeError(f'AI 返回的不是有效 JSON: {e}')
+
+    # 4. 提取的 content 作为最终 content 值
+    result['content'] = content
+    # 日志记录 summary 信息
+    logger.info(f'[LLM] 解题思路：{result["summary"]}')
+    logger.info(f'[LLM] 解析成功：tags={result["tags"]}')
+    return result
 
 
 # ============== 鼓励语生成 ==============
