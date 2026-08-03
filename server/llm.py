@@ -541,6 +541,76 @@ DEFAULT_SUBJECT_CONFIG = {
 }
 
 
+def _estimate_tokens(text: str) -> int:
+    """粗略估算文本 token 数，用于 prompt 长度预算控制。"""
+    if not text:
+        return 0
+    zh = len(re.findall(r'[\u4e00-\u9fff]', text))
+    other = len(text) - zh
+    return int(zh / 1.5 + other / 4) + 1
+
+
+MAX_KNOWLEDGE_POINT_TOKENS = 3200
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r'\s+', '', text or '').lower()
+
+
+def _map_tags_to_knowledge_points(tags: list[str], knowledge_points: list[str]) -> list[str]:
+    """将模型自由生成的标签映射回本地全量知识点库。"""
+    if not tags or not knowledge_points:
+        return tags
+
+    normalized_points = [(_normalize_text(point), point) for point in knowledge_points]
+    mapped: list[str] = []
+
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        normalized_tag = _normalize_text(tag)
+        if not normalized_tag:
+            continue
+
+        best_score = -1
+        best_point = tag.strip()
+        tag_chars = set(re.findall(r'[\u4e00-\u9fffA-Za-z0-9]', normalized_tag))
+
+        for normalized_point, point in normalized_points:
+            if not normalized_point:
+                continue
+            if normalized_tag == normalized_point:
+                best_score = 10**9
+                best_point = point
+                break
+
+            score = 0
+            if normalized_tag in normalized_point:
+                score += 1000 + len(normalized_tag)
+            if normalized_point in normalized_tag:
+                score += 900 + len(normalized_point)
+
+            point_chars = set(re.findall(r'[\u4e00-\u9fffA-Za-z0-9]', normalized_point))
+            shared_chars = len(tag_chars & point_chars)
+            score += shared_chars * 10
+
+            shared_bigrams = 0
+            for idx in range(len(normalized_tag) - 1):
+                bigram = normalized_tag[idx:idx + 2]
+                if bigram and bigram in normalized_point:
+                    shared_bigrams += 1
+            score += shared_bigrams * 25
+
+            if score > best_score:
+                best_score = score
+                best_point = point
+
+        if best_point not in mapped:
+            mapped.append(best_point)
+
+    return mapped or tags
+
+
 def build_analysis_prompt(subject: str = "", content: str = "") -> str:
     """根据学科和题目内容构建分析 prompt"""
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
@@ -549,14 +619,11 @@ def build_analysis_prompt(subject: str = "", content: str = "") -> str:
 
     if knowledge_points:
         kp_section = (
-            '【候选知识点列表】\n'
-            + '\n'.join(f'- {kp}' for kp in knowledge_points)
-            + '\n\n'
-            '2. 从上方【候选知识点列表】中选取 1-4 个最匹配的核心考点，按重要程度排序，优先选取解题过程中最匹配的知识点。仅当确实没有匹配项时，允许输出「未分类」或自行推理 1 个最贴切的考点（命名风格与候选列表保持一致）。'
+            '4. 输出 1-4 个最匹配的核心考点，按重要程度排序。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。'
         )
     else:
         kp_section = (
-            '2. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
+            '4. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
         )
 
     return (
@@ -569,7 +636,7 @@ def build_analysis_prompt(subject: str = "", content: str = "") -> str:
         '1. 先以【题目文本】为最高优先级审题，逐句识别题目的实验/推理顺序、每一步的初始状态、过程变化和最终比较对象。若【已知条件与约束】中的概括与【题目文本】冲突，必须以【题目文本】为准，不得沿用错误概括。\n'
         '2. 对连续过程题、多步实验题、先后变化题，必须特别检查后一步是否建立在前一步结果之上。不要把“同一对象的连续变化”误判为“多个彼此独立且初始状态相同的过程”，也不要默认系统会在步骤之间自动复原。\n'
         '3. 先判断题目的关键结论或比较结果，再提炼考点；若是选择题，要先在心里确定正确选项依据，再生成 summary。\n'
-        + kp_section.replace('2. ', '4. ', 1) + '\n'
+        + kp_section + '\n'
         '5. 给出简要的解题思路：概括关键判断链条、核心物理/数学关系，并明确写出最终比较结论或选项倾向，50-120 字，通俗易懂，但不要编造题目中没有的条件。\n'
         '6. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n'
         '\n'
@@ -645,7 +712,7 @@ class AiConfig:
     model: str = ""
     api_key: str = ""
     timeout: float = 120.0
-    max_tokens: int = 4096
+    max_tokens: int = 2048
 
     @classmethod
     def from_env(cls) -> 'AiConfig':
@@ -654,7 +721,7 @@ class AiConfig:
             model=os.getenv('AI_MODEL', 'deepseek-v4-flash'),
             api_key=os.getenv('AI_API_KEY', ''),
             timeout=float(os.getenv('AI_TIMEOUT', '120')),
-            max_tokens=int(os.getenv('AI_MAX_TOKENS', '4096')),
+            max_tokens=int(os.getenv('AI_MAX_TOKENS', '2048')),
         )
 
 
@@ -701,6 +768,10 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
     logger.info(f'[LLM] 使用 Prompt: {prompt}')
 
     if is_anthropic_endpoint(api_url):
+        content_blocks = []
+        if image_base64:
+            content_blocks.append({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': image_base64.split(',')[1] if ',' in image_base64 else image_base64}})
+        content_blocks.append({'type': 'text', 'text': prompt})
         return {
             'headers': {
                 'Content-Type': 'application/json',
@@ -712,10 +783,7 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
                 'max_tokens': config.max_tokens,
                 'messages': [{
                     'role': 'user',
-                    'content': [
-                        {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': image_base64.split(',')[1] if ',' in image_base64 else image_base64}},
-                        {'type': 'text', 'text': prompt},
-                    ]
+                    'content': content_blocks,
                 }],
             },
         }
@@ -730,7 +798,7 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
                 'messages': [{
                     'role': 'user',
                     'content': prompt,
-                    'images': [image_base64],
+                    'images': [image_base64] if image_base64 else [],
                 }],
             },
         }
@@ -739,8 +807,12 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
     if config.api_key:
         headers['Authorization'] = f'Bearer {config.api_key}'
 
+    content_blocks = [{'type': 'text', 'text': prompt}]
+
     if is_deepseek_endpoint(api_url):
         # DeepSeek 当前兼容接口不接受 image_url，这里回退为纯文本消息以避免请求体校验失败。
+        if image_data_uri:
+            content_blocks.append({'type': 'text', 'text': f'图片数据（data URI）：\n{image_data_uri}'})
         return {
             'headers': headers,
             'body': {
@@ -748,13 +820,13 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
                 'max_tokens': config.max_tokens,
                 'messages': [{
                     'role': 'user',
-                    'content': [
-                        {'type': 'text', 'text': prompt},
-                        {'type': 'text', 'text': f'图片数据（data URI）：\n{image_data_uri}'},
-                    ]
+                    'content': content_blocks,
                 }],
             },
         }
+
+    if image_data_uri:
+        content_blocks.append({'type': 'image_url', 'image_url': {'url': image_data_uri}})
 
     return {
         'headers': headers,
@@ -763,10 +835,7 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
             'max_tokens': config.max_tokens,
             'messages': [{
                 'role': 'user',
-                'content': [
-                    {'type': 'text', 'text': prompt},
-                        {'type': 'image_url', 'image_url': {'url': image_data_uri}},
-                ]
+                'content': content_blocks,
             }],
         },
     }
@@ -995,8 +1064,6 @@ async def analyze_image(
 
     logger.info(f'[LLM] 开始分析图片：{image_path}')
 
-    image_base64, data_uri = _encode_image(image_path)
-
     api_url = normalize_api_url(config.api_url)
     if not api_url or not config.model.strip():
         raise ValueError('AI 配置不完整：请设置 API URL 和模型名')
@@ -1011,7 +1078,7 @@ async def analyze_image(
     # 2. 基于题目内容构建分析 prompt 并调用 AI
     logger.info(f'[LLM] 调用 AI API: url={api_url}, model={config.model}')
     prompt = build_analysis_prompt(subject, content)
-    response_text = await _call_ai(config, api_url, data_uri, image_base64, prompt)
+    response_text = await _call_ai(config, api_url, '', '', prompt)
 
     # 3. 解析 JSON 结果
     try:
@@ -1019,6 +1086,9 @@ async def analyze_image(
     except json.JSONDecodeError as e:
         logger.error(f'[LLM] JSON 解析失败：{e}, raw={response_text[:300]}')
         raise RuntimeError(f'AI 返回的不是有效 JSON: {e}')
+
+    cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
+    result['tags'] = _map_tags_to_knowledge_points(result.get('tags', []), cfg.get('knowledge_points', []))
 
     # 4. 提取的 content 作为最终 content 值
     result['content'] = content
