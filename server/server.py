@@ -699,6 +699,9 @@ async def analyze(data: dict):
     if not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail=f"图片文件不存在：{file_path}")
 
+    # 可选：调用方提供的题目内容（非空时跳过图片提取）
+    content = (data.get("content") or "").strip() or None
+
     cfg = _get_ai_config()
     ai_config = AiConfig(
         api_url=cfg["api_url"],
@@ -709,10 +712,10 @@ async def analyze(data: dict):
     )
 
     subject = _infer_subject(file_path)
-    logger.info(f'[API] 收到分析请求：{file_path}, subject={subject}')
+    logger.info(f'[API] 收到分析请求：{file_path}, subject={subject}, 提供 content={"是" if content else "否"}')
 
     try:
-        result = await analyze_image(file_path, ai_config, subject=subject)
+        result = await analyze_image(file_path, ai_config, subject=subject, content=content)
         logger.info(f'[API] 分析完成：{file_path} -> tags={result.get("tags", [])}')
         return result
     except FileNotFoundError as e:

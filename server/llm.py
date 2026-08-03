@@ -10,7 +10,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -619,11 +619,11 @@ def build_analysis_prompt(subject: str = "", content: str = "") -> str:
 
     if knowledge_points:
         kp_section = (
-            '4. 输出 1-4 个最匹配的核心考点，按重要程度排序。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。'
+            '3. 输出 1-4 个最匹配的核心考点，按重要程度排序。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。'
         )
     else:
         kp_section = (
-            '4. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
+            '3. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
         )
 
     return (
@@ -635,14 +635,17 @@ def build_analysis_prompt(subject: str = "", content: str = "") -> str:
         '【步骤】\n'
         '1. 先以【题目文本】为最高优先级审题，逐句识别题目的实验/推理顺序、每一步的初始状态、过程变化和最终比较对象。若【已知条件与约束】中的概括与【题目文本】冲突，必须以【题目文本】为准，不得沿用错误概括。\n'
         '2. 对连续过程题、多步实验题、先后变化题，必须特别检查后一步是否建立在前一步结果之上。不要把“同一对象的连续变化”误判为“多个彼此独立且初始状态相同的过程”，也不要默认系统会在步骤之间自动复原。\n'
-        '3. 先判断题目的关键结论或比较结果，再提炼考点；若是选择题，要先在心里确定正确选项依据，再生成 summary。\n'
         + kp_section + '\n'
-        '5. 给出简要的解题思路：概括关键判断链条、核心物理/数学关系，并明确写出最终比较结论或选项倾向，50-120 字，通俗易懂，但不要编造题目中没有的条件。\n'
-        '6. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n'
+        '4. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n'
         '\n'
         '【输出格式】\n'
-        '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹：\n'
-        '{"content": "与上方【题目内容】一致", "summary": "先点明关键判断依据，再说明最终结论或判断方向", "tags": ["知识点 1", "知识点 2", "知识点 3"], "difficulty": 3}'
+        '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹。必须且只能包含以下 4 个字段，缺一不可：\n'
+        '1. content：字符串。因为调用方已提供【题目内容】，此处直接写"（同上方题目内容）"即可，禁止复制全文。\n'
+        '2. summary：字符串，必填，非空。用 120-200 字概括这道题的解题思路：讲清楚关键的解题步骤、用了什么方法或切入点、最终得到什么结论。要具体、针对本题，不要写空话套话。\n'
+        '3. tags：数组，1-4 个最匹配的核心考点。\n'
+        '4. difficulty：整数，1-5。\n'
+        '示例：\n'
+        '{"content": "（同上方题目内容）", "summary": "先利用正方形对角线互相垂直平分且相等的性质，得到 AF 与 FG 所在的直角三角形；再通过证明三角形全等或相似，求出 AF/FG 的比值。", "tags": ["正方形的性质", "相似三角形"], "difficulty": 3}'
     )
 
 
@@ -712,7 +715,7 @@ class AiConfig:
     model: str = ""
     api_key: str = ""
     timeout: float = 120.0
-    max_tokens: int = 2048
+    max_tokens: int = 4096
 
     @classmethod
     def from_env(cls) -> 'AiConfig':
@@ -721,7 +724,7 @@ class AiConfig:
             model=os.getenv('AI_MODEL', 'deepseek-v4-flash'),
             api_key=os.getenv('AI_API_KEY', ''),
             timeout=float(os.getenv('AI_TIMEOUT', '120')),
-            max_tokens=int(os.getenv('AI_MAX_TOKENS', '2048')),
+            max_tokens=int(os.getenv('AI_MAX_TOKENS', '4096')),
         )
 
 
@@ -768,7 +771,7 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
     logger.info(f'[LLM] 使用 Prompt: {prompt}')
 
     if is_anthropic_endpoint(api_url):
-        content_blocks = []
+        content_blocks: list[dict[str, Any]] = []
         if image_base64:
             content_blocks.append({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': image_base64.split(',')[1] if ',' in image_base64 else image_base64}})
         content_blocks.append({'type': 'text', 'text': prompt})
@@ -807,7 +810,7 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
     if config.api_key:
         headers['Authorization'] = f'Bearer {config.api_key}'
 
-    content_blocks = [{'type': 'text', 'text': prompt}]
+    content_blocks: list[dict[str, Any]] = [{'type': 'text', 'text': prompt}]
 
     if is_deepseek_endpoint(api_url):
         # DeepSeek 当前兼容接口不接受 image_url，这里回退为纯文本消息以避免请求体校验失败。
@@ -905,8 +908,10 @@ def parse_analysis_result(raw_text: str) -> dict:
     content = ''
     summary = ''
     difficulty = 3
+    tags = []
     if isinstance(parsed, list):
-        tags = parsed
+        # 模型可能只返回了 tags 数组（不完整输出），尝试从数组中提取
+        tags = [t for t in parsed if isinstance(t, str)]
     elif isinstance(parsed, dict):
         tags = parsed.get('tags') if isinstance(parsed.get('tags'), list) else []
         content = parsed.get('content', '') if isinstance(parsed.get('content'), str) else ''
@@ -924,8 +929,15 @@ def parse_analysis_result(raw_text: str) -> dict:
             difficulty = 1
         elif difficulty > 5:
             difficulty = 5
-    else:
-        tags = []
+
+    # 兜底：若 summary 仍为空，尝试从原始文本中提取 summary 字段值
+    if not summary.strip() and cleaned:
+        m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned, re.DOTALL)
+        if m:
+            extracted = m.group(1).replace('\\"', '"').replace('\\n', '\n').strip()
+            if extracted:
+                summary = extracted
+
     return {'content': content.strip(), 'summary': summary.strip(), 'tags': tags, 'difficulty': difficulty}
 
 
@@ -1042,6 +1054,7 @@ async def analyze_image(
     image_path: str,
     config: Optional[AiConfig] = None,
     subject: str = "",
+    content: str | None = None,
 ) -> dict:
     """
     分析错题图片，返回 {content, summary, tags, difficulty}。
@@ -1050,6 +1063,7 @@ async def analyze_image(
         image_path: 图片文件的绝对路径
         config: AI 配置，若为 None 则从环境变量读取
         subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
+        content: 已提取的题目内容，若提供则跳过 OCR 提取步骤
 
     Returns:
         {'content': str, 'summary': str, 'tags': list[str], 'difficulty': int}
@@ -1070,10 +1084,12 @@ async def analyze_image(
     if should_require_api_key(api_url) and not config.api_key:
         raise ValueError('该端点需要 API Key')
 
-    # 1. 提取完整题目内容
-    content = await extract_problem_content(image_path, config)
-    # log 记录 content 全部内容
-    logger.info(f'[LLM] 题目内容：{content if len(content) < 100 else content[:100] }')
+    # 1. 获取题目内容：若调用方已提供则跳过 OCR 提取
+    if content:
+        logger.info(f'[LLM] 使用调用方提供的题目内容（跳过 OCR）')
+    else:
+        content = await extract_problem_content(image_path, config)
+        logger.info(f'[LLM] 题目内容：{content if len(content) < 100 else content[:100] }')
 
     # 2. 基于题目内容构建分析 prompt 并调用 AI
     logger.info(f'[LLM] 调用 AI API: url={api_url}, model={config.model}')

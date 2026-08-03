@@ -2168,6 +2168,15 @@ export default function App() {
         text: solutionTextRef.current,
         images: solutionImagesRef.current,
       });
+      // 编辑并保存即视为一次练习：练习时间更新为当前时间，未练习时长立即重置
+      const now = new Date();
+      const practicedAt =
+        now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0') + ' ' +
+        String(now.getHours()).padStart(2, '0') + ':' +
+        String(now.getMinutes()).padStart(2, '0') + ':' +
+        String(now.getSeconds()).padStart(2, '0');
       await API.updateImage(
         detail.file_path,
         title,
@@ -2177,7 +2186,7 @@ export default function App() {
         notes,
         detailMastery,
         detailPracticeCount,
-        detail.last_practiced_at,
+        practicedAt,
         solution,
         detailDifficulty,
         detailSourceRef.current,
@@ -2190,7 +2199,12 @@ export default function App() {
         mastery: detailMastery,
         difficulty: detailDifficulty,
         practice_count: detailPracticeCount,
+        last_practiced_at: practicedAt,
         solution,
+        // 立即刷新重点练的未练习时长显示
+        inactive_hours: 0,
+        inactive_days_text: '0 天',
+        is_focus_overdue: false,
       };
       setDetail(updated);
       setAllIndexed((prev) => prev.map((p) => (p.file_path === detail.file_path ? updated : p)));
@@ -2221,7 +2235,11 @@ export default function App() {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: detail.file_path })
+        // 若「AI 提取题目内容」编辑框已有内容，直接复用，不再从图片提取
+        body: JSON.stringify({
+          file_path: detail.file_path,
+          content: (detailContentRef.current || '').trim() || undefined
+        })
       });
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({}));
@@ -2571,7 +2589,7 @@ export default function App() {
                           placeholder="题目的文字描述，方便以后搜索" />
                       </div>
                       <div className="field">
-                        <label className="field-label">AI提取题目内容</label>
+                        <label className="field-label">AI 提取题目内容</label>
                         <textarea rows={6} value={draft.content}
                           onChange={(e) => setDraft({ ...draft, content: e.target.value })}
                           placeholder="AI 从图片中提取的题目内容，可手动修正" />
@@ -3011,7 +3029,7 @@ export default function App() {
               )}
 
               <div className="field" style={{ marginBottom: 14 }}>
-                <label className="field-label">AI提取题目内容</label>
+                <label className="field-label">AI 提取题目内容</label>
                 <textarea rows={6} value={detailContent}
                   onChange={(e) => { setDetailContent(e.target.value); detailContentRef.current = e.target.value; }}
                   onBlur={saveDetailContent}
