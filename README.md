@@ -129,25 +129,24 @@ cd ..
 
 ### 第 2 步：配置 AI 服务
 
-在项目根目录创建或编辑 `.env` 文件，配置 AI 服务参数：
+在项目根目录创建或编辑 `.env` 文件，配置两套 AI 服务参数（所有密钥仅保存在 `.env`）：
 
 ```env
-# 示例 1：使用 OpenAI
-AI_API_URL=https://api.openai.com/v1/chat/completions
-AI_MODEL=gpt-4-vision
-AI_API_KEY=sk-your-api-key-here
+# ---- 图片题目提取配置（视觉模型，必须支持图片输入）----
+IMAGE_ANALYSIS_AI_API_URL=http://localhost:11434
+IMAGE_ANALYSIS_AI_MODEL=llava
+IMAGE_ANALYSIS_API_KEY=sk-your-image-analysis-api-key
 
-# 示例 2：使用本地 Ollama
-AI_API_URL=http://localhost:11434
-AI_MODEL=llava
-
-# 示例 3：使用 Claude
-AI_API_URL=https://api.anthropic.com/v1/messages
-AI_MODEL=claude-3-5-sonnet
-AI_API_KEY=sk-ant-your-api-key
+# ---- 解题分析配置（文本模型，无需图片输入）----
+PROBLEM_AI_API_URL=http://localhost:11434
+PROBLEM_API_MODEL=qwen2.5
+PROBLEM_API_KEY=sk-your-problem-analysis-api-key
 ```
 
-> 📌 **重要**：所选模型**必须支持图片输入**。不同 AI 服务的配置格式详见[「AI 配置」](#ai-配置)部分。
+> 📌 **重要**：
+> - **图片题目提取模型**（`IMAGE_ANALYSIS_*`）**必须支持图片输入**（如 GPT-4 Vision、Claude、LLaVA）。
+> - **解题分析模型**（`PROBLEM_*`）只需支持文本输入即可，可选用更便宜或更擅长结构化输出的模型。
+> - 不同 AI 服务的配置格式详见[「AI 配置」](#ai-配置)部分。
 
 ### 第 3 步：一键启动（推荐）
 
@@ -287,22 +286,26 @@ C:\Users\me\Pictures\错题\
 
 ### AI 配置
 
-AI 参数由后端服务统一管理，通过 `Smart-Mistake-Lab/` 目录下的 `.env` 文件配置：
+AI 参数由后端服务统一管理，通过 `Smart-Mistake-Lab/` 目录下的 `.env` 文件配置。系统使用**两套独立配置**，分别用于不同的 AI 任务：
 
 ```env
-AI_API_URL=https://your-openai-compatible-host/v1/chat/completions
-AI_MODEL=your-vision-model
-AI_API_KEY=sk-your-api-key-here
+# ---- 图片题目提取配置（视觉模型，必须支持图片输入）----
+IMAGE_ANALYSIS_AI_API_URL=https://your-vision-model-host/v1/chat/completions
+IMAGE_ANALYSIS_AI_MODEL=your-vision-model
+IMAGE_ANALYSIS_API_KEY=sk-your-image-analysis-api-key
+
+# ---- 解题分析配置（文本模型，无需图片输入）----
+PROBLEM_AI_API_URL=https://your-text-model-host/v1/chat/completions
+PROBLEM_API_MODEL=your-text-model
+PROBLEM_API_KEY=sk-your-problem-analysis-api-key
 ```
 
-> API Key 仅存于服务端，不会暴露到浏览器端。修改后需重启后端服务（重新运行启动脚本，或手动执行 `uv run python server.py`）。
+> 所有 LLM 配置（URL / 模型名 / API Key）仅存于 `.env`，不会暴露到浏览器端，也不会写入数据库。修改后需重启后端服务（重新运行启动脚本，或手动执行 `uv run python server.py`）。
 
-说明：
+职责说明：
 
-- 本应用的"AI 分析知识点"会向模型发送图片输入，因此所选模型必须支持视觉输入。
-- DeepSeek 当前仅支持文本消息，不支持本应用使用的图片分析请求格式，因此不适合作为这里的图片分析模型。
-- 如果你使用 Anthropic Messages 接口，请将 URL 配置为 `/v1/messages`，并使用支持图片输入的模型。
-- AI 分析的结果包含 **题目文字内容**（`content`）和 **知识点标签**（`tags`），两者均会被持久化保存并可在前端编辑。
+- **图片题目提取**（`IMAGE_ANALYSIS_*`）：从错题图片中提取完整题目内容，所用模型**必须支持视觉输入**。
+- **解题分析**（`PROBLEM_*`）：基于题目文本生成解题思路（summary）、知识点标签（tags）和难度（difficulty），以及**重点练鼓励语**，所用模型只需支持文本输入。
 
 ### 支持的 AI 接口格式
 
@@ -321,7 +324,7 @@ Smart-Mistake-Lab/
 ├── index.html                  # 入口 HTML
 ├── package.json                # 前端依赖与脚本
 ├── vite.config.js              # Vite 配置（含 API 代理）
-├── .env                        # 环境变量（AI_API_URL / AI_MODEL / AI_API_KEY）
+├── .env                        # 环境变量（两套 LLM 配置：IMAGE_ANALYSIS_* / PROBLEM_*）
 ├── mistake-notebook.jsx        # 主应用组件（含所有页面逻辑与样式）
 ├── start.ps1                   # Windows PowerShell 一键启动脚本
 ├── start.bat                   # Windows CMD 一键启动脚本
@@ -347,8 +350,8 @@ Smart-Mistake-Lab/
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/config` | 获取配置（图片目录、重点练超时阈值） |
 | PUT | `/api/config` | 保存配置（图片目录、重点练超时阈值） |
-| GET | `/api/ai-config` | 获取 AI 配置（不返回完整 API Key） |
-| PUT | `/api/ai-config` | 保存 AI 配置 |
+| GET | `/api/ai-config` | 获取 AI 配置状态（仅展示 .env 中两套配置的 URL/模型/是否已设置 Key，不返回 Key 原文） |
+| PUT | `/api/ai-config` | 已废弃：LLM 配置仅由 .env 管理，写请求不再生效 |
 | GET | `/api/scan` | 扫描图片目录，按学科分组返回已索引/未索引文件列表（含 `subject_order`） |
 | GET | `/api/images/all` | 获取所有已索引图片，支持筛选参数 |
 |      |                    | - `subject`: 按学科筛选（默认空=全部） |
@@ -378,7 +381,7 @@ Smart-Mistake-Lab/
 2. 运行一键启动脚本（如 `start.ps1`），或分别手动启动后端和前端
 3. 打开浏览器访问 `http://127.0.0.1:5173` 或 `http://localhost:5173`（指定 `--ip` 时访问对应的地址）
 4. 进入 **配置** 页面，设置图片存放目录路径并保存
-5. 确保 `.env` 文件中已配置 `AI_API_URL`、`AI_MODEL`、`AI_API_KEY`
+5. 确保 `.env` 文件中已配置 `IMAGE_ANALYSIS_AI_API_URL` / `IMAGE_ANALYSIS_AI_MODEL`（图片提取，需视觉模型）以及 `PROBLEM_AI_API_URL` / `PROBLEM_API_MODEL`（解题分析）
 6. 切换到 **扫描** 页面，点击 **刷新扫描**，图片会按学科分组展示
 7. 点击任意 **待索引** 的图片缩略图
 8. 点击 **AI 分析知识点**，等待分析完成（AI 会根据学科自动选择知识点列表）
@@ -562,7 +565,10 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 **症状**：点击"AI 分析知识点"后长时间无响应或报错
 
 **解决方案**：
-1. 检查 `.env` 文件中的 `AI_API_URL`、`AI_MODEL`、`AI_API_KEY` 是否正确
+1. 检查 `.env` 文件中的配置是否正确：
+   - 图片提取：`IMAGE_ANALYSIS_AI_API_URL`、`IMAGE_ANALYSIS_AI_MODEL`（须支持图片输入）
+   - 解题分析：`PROBLEM_AI_API_URL`、`PROBLEM_API_MODEL`
+   - 若为 Anthropic 端点，还需对应配置 `IMAGE_ANALYSIS_API_KEY` / `PROBLEM_API_KEY`
 2. 确保网络连接正常（如使用国外 API，检查是否需要代理）
 3. 检查 AI 服务是否在线（访问官网或尝试其他客户端）
 4. 查看后端日志：`server/logs/server.log`，获取详细错误信息

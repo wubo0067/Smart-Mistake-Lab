@@ -30,9 +30,12 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理（替代已弃用的 on_event）"""
     logger.info("Smart Mistake Lab Server 初始化本地数据库...")
     db.init_db()
-    cfg = AiConfig.from_env()
-    logger.info(f"AI 配置：api_url={cfg.api_url}, model={cfg.model}, "
-                f"has_api_key={'Yes' if cfg.api_key else 'No'}, timeout={cfg.timeout}s, max_tokens={cfg.max_tokens}")
+    image_cfg = AiConfig.for_image_analysis()
+    problem_cfg = AiConfig.for_problem_analysis()
+    logger.info(f"AI 配置（图片题目提取）：api_url={image_cfg.api_url}, model={image_cfg.model}, "
+                f"has_api_key={'Yes' if image_cfg.api_key else 'No'}, timeout={image_cfg.timeout}s, max_tokens={image_cfg.max_tokens}")
+    logger.info(f"AI 配置（解题分析）：api_url={problem_cfg.api_url}, model={problem_cfg.model}, "
+                f"has_api_key={'Yes' if problem_cfg.api_key else 'No'}, timeout={problem_cfg.timeout}s, max_tokens={problem_cfg.max_tokens}")
     logger.info("Smart Mistake Lab Server 启动完成")
     yield
 
@@ -651,16 +654,25 @@ def delete_solution_image(path: str = Query(..., description="解答图片的绝
 
 
 # --- AI Config ---
+# 所有 LLM 配置（URL / 模型名 / API Key）统一由 .env 管理，防止泄露。
+# 此接口保留为只读兼容壳：GET 展示两套配置状态，PUT 不再写入数据库。
+
 
 def _get_ai_config() -> dict:
-    """获取 AI 配置，DB 中的值优先于环境变量"""
-    env = AiConfig.from_env()
+    """获取 AI 配置，全部来自 .env（图片提取 + 解题分析两套）"""
+    image_cfg = AiConfig.for_image_analysis()
+    problem_cfg = AiConfig.for_problem_analysis()
     return {
-        "api_url": db.get_config_value("ai_api_url") or env.api_url,
-        "model": db.get_config_value("ai_model") or env.model,
-        "api_key": db.get_config_value("ai_api_key") or env.api_key,
-        "timeout": env.timeout,
-        "max_tokens": env.max_tokens,
+        "image_analysis": {
+            "api_url": image_cfg.api_url,
+            "model": image_cfg.model,
+            "has_api_key": bool(image_cfg.api_key),
+        },
+        "problem": {
+            "api_url": problem_cfg.api_url,
+            "model": problem_cfg.model,
+            "has_api_key": bool(problem_cfg.api_key),
+        },
     }
 
 
@@ -668,22 +680,13 @@ def _get_ai_config() -> dict:
 def get_ai_config():
     cfg = _get_ai_config()
     # 不返回完整的 api_key，只返回是否已设置
-    return {
-        "api_url": cfg["api_url"],
-        "model": cfg["model"],
-        "has_api_key": bool(cfg["api_key"]),
-    }
+    return cfg
 
 
 @app.put("/api/ai-config")
 def update_ai_config(data: dict):
-    if "api_url" in data and data["api_url"]:
-        db.set_config_value("ai_api_url", data["api_url"])
-    if "model" in data and data["model"]:
-        db.set_config_value("ai_model", data["model"])
-    if "api_key" in data and data["api_key"]:
-        db.set_config_value("ai_api_key", data["api_key"])
-    logger.info("AI 配置已更新")
+    # 配置页面保持不变；LLM 配置仅由 .env 管理，写请求不再落库
+    logger.warning("[ai-config] 写接口已废弃：LLM 配置仅由 .env 管理，本次修改请求已忽略")
     return get_ai_config()
 
 
@@ -702,20 +705,20 @@ async def analyze(data: dict):
     # 可选：调用方提供的题目内容（非空时跳过图片提取）
     content = (data.get("content") or "").strip() or None
 
-    cfg = _get_ai_config()
-    ai_config = AiConfig(
-        api_url=cfg["api_url"],
-        model=cfg["model"],
-        api_key=cfg["api_key"],
-        timeout=cfg["timeout"],
-        max_tokens=cfg["max_tokens"],
-    )
+    image_config = AiConfig.for_image_analysis()
+    problem_config = AiConfig.for_problem_analysis()
 
     subject = _infer_subject(file_path)
     logger.info(f'[API] 收到分析请求：{file_path}, subject={subject}, 提供 content={"是" if content else "否"}')
 
     try:
-        result = await analyze_image(file_path, ai_config, subject=subject, content=content)
+        result = await analyze_image(
+            file_path,
+            image_config=image_config,
+            problem_config=problem_config,
+            subject=subject,
+            content=content,
+        )
         logger.info(f'[API] 分析完成：{file_path} -> tags={result.get("tags", [])}')
         return result
     except FileNotFoundError as e:

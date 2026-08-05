@@ -1,4 +1,4 @@
-""",?
+"""
 Smart Mistake Lab - LLM 交互模块
 负责 Prompt 管理、AI API 调用、响应解析。
 """
@@ -788,11 +788,12 @@ PROBLEM_EXTRACTION_PROMPT = """# Role: 题目结构化解构专家 (Problem Deco
 """
 
 
-# 保留旧变量以兼容可能的引用
 ANALYSIS_PROMPT = build_analysis_prompt()
 
 
 # ============== 默认 AI 配置 ==============
+# 所有 LLM 配置（URL / 模型名 / API Key）统一从 .env 读取，防止泄露。
+# 题目提取（视觉模型）与解题分析（文本模型）使用两套独立配置。
 
 @dataclass
 class AiConfig:
@@ -803,11 +804,23 @@ class AiConfig:
     max_tokens: int = 4096
 
     @classmethod
-    def from_env(cls) -> 'AiConfig':
+    def for_image_analysis(cls) -> 'AiConfig':
+        """读取图片题目提取专用配置（视觉模型）"""
         return cls(
-            api_url=os.getenv('AI_API_URL', 'https://api.deepseek.com'),
-            model=os.getenv('AI_MODEL', 'deepseek-v4-flash'),
-            api_key=os.getenv('AI_API_KEY', ''),
+            api_url=os.getenv('IMAGE_ANALYSIS_AI_API_URL', ''),
+            model=os.getenv('IMAGE_ANALYSIS_AI_MODEL', ''),
+            api_key=os.getenv('IMAGE_ANALYSIS_API_KEY', ''),
+            timeout=float(os.getenv('AI_TIMEOUT', '120')),
+            max_tokens=int(os.getenv('AI_MAX_TOKENS', '4096')),
+        )
+
+    @classmethod
+    def for_problem_analysis(cls) -> 'AiConfig':
+        """读取解题分析专用配置（文本模型）"""
+        return cls(
+            api_url=os.getenv('PROBLEM_AI_API_URL', ''),
+            model=os.getenv('PROBLEM_API_MODEL', ''),
+            api_key=os.getenv('PROBLEM_API_KEY', ''),
             timeout=float(os.getenv('AI_TIMEOUT', '120')),
             max_tokens=int(os.getenv('AI_MAX_TOKENS', '4096')),
         )
@@ -931,6 +944,53 @@ def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, i
 
 # ============== 响应解析 ==============
 
+def _extract_json_from_tail(text: str) -> str:
+    """从文本末尾提取最后一个完整合法的 JSON 对象/数组（平衡括号法）。
+
+    推理模型的最终答案通常写在推理内容末尾，这里从后往前找最后一个
+    能通过 json.loads 的完整 JSON，避免贪婪正则把推理文本也吞进来。
+    """
+    if not text:
+        return ''
+    # 从后往前找最后一个闭合括号（} 或 ]），再往回匹配对应的起始括号
+    for end in range(len(text) - 1, -1, -1):
+        ch = text[end]
+        if ch not in ']}':
+            continue
+        open_ch = '{' if ch == '}' else '['
+        depth = 1
+        in_string = False
+        escape = False
+        start = -1
+        for i in range(end - 1, -1, -1):
+            c = text[i]
+            if in_string:
+                if escape:
+                    escape = False
+                elif c == '\\':
+                    escape = True
+                elif c == '"':
+                    in_string = False
+                continue
+            if c == '"':
+                in_string = True
+            elif c == open_ch:
+                depth -= 1
+                if depth == 0:
+                    start = i
+                    break
+            elif c == ch:
+                depth += 1
+        if start != -1:
+            candidate = text[start:end + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue  # 该段不是合法 JSON，继续找更早的闭合括号
+    return ''
+
+
 def extract_text_from_response(data: dict, api_url: str) -> str:
     """从 AI 响应中提取文本内容"""
     if is_anthropic_endpoint(api_url):
@@ -948,15 +1008,45 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
             return thinking
         return ''
 
-    content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
-    reasoning = data.get('choices', [{}])[0].get('message', {}).get('reasoning', '')
+    message = data.get('choices', [{}])[0].get('message', {})
+    finish_reason = data.get('choices', [{}])[0].get('finish_reason', '')
+    content = message.get('content', '')
+    reasoning = message.get('reasoning', '')
+    reasoning_content = message.get('reasoning_content', '')
+
+    # 为了调试，打印输出 content 的内容
+    logger.debug(f'[LLM] content: {content}')
+    if finish_reason:
+        logger.info(f'[LLM] finish_reason: {finish_reason}')
+
+    # DeepSeek（推理模型）：最终答案直接写在 content 字段，且本身就是完整 JSON。
+    # 直接从 content 提取 JSON 返回，不走 reasoning 回退逻辑。
+    # 注意：content 为空时不要回退到 reasoning_content（那是思考过程，不是答案），
+    # 直接失败并提示，避免静默返回空结构。
+    if is_deepseek_endpoint(api_url):
+        if isinstance(content, str) and content.strip():
+            tail_json = _extract_json_from_tail(content)
+            return tail_json if tail_json else content.strip()
+        if finish_reason == 'length':
+            logger.error('[LLM] DeepSeek 输出被 max_tokens 截断（finish_reason=length），content 为空，请调大 AI_MAX_TOKENS')
+        else:
+            logger.error('[LLM] DeepSeek content 为空，未生成最终 JSON')
+        return ''
+
     if isinstance(content, str) and content.strip():
         return content
-    # thinking 模型可能把最终答案放在 content，推理过程在 reasoning；
-    # 若 content 为空则回退到 reasoning（也可能是 token 不足，仅输出了 reasoning）
-    if isinstance(reasoning, str) and reasoning.strip():
-        logger.info('[LLM] content 为空，使用 reasoning 字段')
-        return reasoning
+
+    # 其他 OpenAI 兼容推理模型可能把最终答案放在 reasoning / reasoning_content，
+    # 若 content 为空则回退到这两个字段。
+    for field_name, field_value in (('reasoning', reasoning), ('reasoning_content', reasoning_content)):
+        if isinstance(field_value, str) and field_value.strip():
+            logger.info(f'[LLM] content 为空，尝试从 {field_name} 提取最终 JSON')
+            tail_json = _extract_json_from_tail(field_value)
+            if tail_json:
+                return tail_json
+            if finish_reason == 'length':
+                logger.error('[LLM] 输出被 max_tokens 截断（finish_reason=length），未生成完整 JSON，请调大 AI_MAX_TOKENS')
+            return field_value
     if isinstance(content, list):
         return ''.join(item.get('text', '') for item in content if item.get('type') == 'text')
     return ''
@@ -1022,6 +1112,9 @@ def parse_analysis_result(raw_text: str) -> dict:
             extracted = m.group(1).replace('\\"', '"').replace('\\n', '\n').strip()
             if extracted:
                 summary = extracted
+
+    if not summary.strip() and not tags:
+        logger.warning(f'[LLM] 解析结果为空（summary/tags 均缺失），原始文本可能是被截断的推理内容：{cleaned[:200]}')
 
     return {'content': content.strip(), 'summary': summary.strip(), 'tags': tags, 'difficulty': difficulty}
 
@@ -1105,9 +1198,11 @@ async def extract_problem_content(
     """
     从错题图片中提取完整的题目内容（自包含推理提示词）。
 
+    使用图片题目提取专用配置（IMAGE_ANALYSIS_*，需支持图片输入的视觉模型）。
+
     Args:
         image_path: 图片文件的绝对路径
-        config: AI 配置，若为 None 则从环境变量读取
+        config: AI 配置，若为 None 则从 .env 读取图片提取配置
 
     Returns:
         str: 提取的题目内容（可直接复制的 Generated Prompt）
@@ -1118,7 +1213,7 @@ async def extract_problem_content(
         RuntimeError: AI 调用失败
     """
     if config is None:
-        config = AiConfig.from_env()
+        config = AiConfig.for_image_analysis()
 
     logger.info(f'[LLM] 开始提取图片题目内容：{image_path}')
 
@@ -1137,16 +1232,22 @@ async def extract_problem_content(
 
 async def analyze_image(
     image_path: str,
-    config: Optional[AiConfig] = None,
+    image_config: Optional[AiConfig] = None,
+    problem_config: Optional[AiConfig] = None,
     subject: str = "",
     content: str | None = None,
 ) -> dict:
     """
     分析错题图片，返回 {content, summary, tags, difficulty}。
 
+    题目提取（图片 OCR）与解题分析使用两套独立 AI 配置：
+        - image_config: 从图片提取完整题目内容（需视觉模型）
+        - problem_config: 基于题目文本做解题分析（summary/tags/difficulty，文本模型即可）
+
     Args:
         image_path: 图片文件的绝对路径
-        config: AI 配置，若为 None 则从环境变量读取
+        image_config: 图片题目提取 AI 配置，若为 None 则从 .env 读取
+        problem_config: 解题分析 AI 配置，若为 None 则从 .env 读取
         subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
         content: 已提取的题目内容，若提供则跳过 OCR 提取步骤
 
@@ -1158,28 +1259,36 @@ async def analyze_image(
         ValueError: AI 配置无效
         RuntimeError: AI 调用失败
     """
-    if config is None:
-        config = AiConfig.from_env()
+    if image_config is None:
+        image_config = AiConfig.for_image_analysis()
+    if problem_config is None:
+        problem_config = AiConfig.for_problem_analysis()
 
     logger.info(f'[LLM] 开始分析图片：{image_path}')
 
-    api_url = normalize_api_url(config.api_url)
-    if not api_url or not config.model.strip():
-        raise ValueError('AI 配置不完整：请设置 API URL 和模型名')
-    if should_require_api_key(api_url) and not config.api_key:
-        raise ValueError('该端点需要 API Key')
+    image_api_url = normalize_api_url(image_config.api_url)
+    if not image_api_url or not image_config.model.strip():
+        raise ValueError('AI 配置不完整（图片提取）：请设置 API URL 和模型名')
+    if should_require_api_key(image_api_url) and not image_config.api_key:
+        raise ValueError('该端点需要 API Key（图片提取）')
+
+    problem_api_url = normalize_api_url(problem_config.api_url)
+    if not problem_api_url or not problem_config.model.strip():
+        raise ValueError('AI 配置不完整（解题分析）：请设置 API URL 和模型名')
+    if should_require_api_key(problem_api_url) and not problem_config.api_key:
+        raise ValueError('该端点需要 API Key（解题分析）')
 
     # 1. 获取题目内容：若调用方已提供则跳过 OCR 提取
     if content:
         logger.info(f'[LLM] 使用调用方提供的题目内容（跳过 OCR）')
     else:
-        content = await extract_problem_content(image_path, config)
+        content = await extract_problem_content(image_path, image_config)
         logger.info(f'[LLM] 题目内容：{content if len(content) < 100 else content[:100] }')
 
-    # 2. 基于题目内容构建分析 prompt 并调用 AI
-    logger.info(f'[LLM] 调用 AI API: url={api_url}, model={config.model}')
+    # 2. 基于题目内容构建分析 prompt 并调用 AI（纯文本，使用解题分析配置）
+    logger.info(f'[LLM] 调用 AI API（解题分析）: url={problem_api_url}, model={problem_config.model}')
     prompt = build_analysis_prompt(subject, content)
-    response_text = await _call_ai(config, api_url, '', '', prompt)
+    response_text = await _call_ai(problem_config, problem_api_url, '', '', prompt)
 
     # 3. 解析 JSON 结果
     try:
@@ -1390,20 +1499,13 @@ async def generate_encouragements(items: list[dict]) -> dict:
     items: [{title, subject, tags, inactive_hours, is_focus_overdue, file_path}, ...]
     返回：{file_path: message, ...}
     每道题独立调一次 LLM，互不影响。
+
+    使用解题分析配置（PROBLEM_*）访问 AI。
     """
-    from_env = AiConfig.from_env()
-    cfg = {
-        "api_url": os.environ.get("AI_API_URL") or from_env.api_url,
-        "model": os.environ.get("AI_MODEL") or from_env.model,
-        "api_key": os.environ.get("AI_API_KEY") or from_env.api_key,
-    }
-    ai_config = AiConfig(
-        api_url=cfg["api_url"],
-        model=cfg["model"],
-        api_key=cfg["api_key"],
-        timeout=120.0,
-        max_tokens=1024,
-    )
+    ai_config = AiConfig.for_problem_analysis()
+    # 鼓励语为短文本，沿用原有输出预算
+    ai_config.timeout = 120.0
+    ai_config.max_tokens = 1024
     api_url = normalize_api_url(ai_config.api_url)
     if not api_url or not ai_config.model.strip():
         logger.warning("[Encourage] AI 未配置，跳过鼓励语生成")

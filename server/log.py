@@ -14,7 +14,7 @@ LOG_FILE = os.path.join(LOG_DIR, 'server.log')
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
-LOG_FORMAT = '%(asctime)s | %(levelname)-7s | %(name)s | %(message)s'
+LOG_FORMAT = '%(asctime)s | %(levelname)-7s | %(filename)s:%(lineno)d | %(name)s | %(message)s'
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 
