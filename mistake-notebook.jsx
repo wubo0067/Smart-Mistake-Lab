@@ -423,7 +423,10 @@ const CSS = `
   display: flex; justify-content: space-between; align-items: center;
   margin-top: 6px; gap: 6px;
 }
-.mnb .card-mastery { font-size: 10.5px; color: var(--accent-2); }
+.mnb .card-mastery {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; color: var(--ink);
+}
 .mnb .card-practice { font-size: 10.5px; color: var(--ink-soft); }
 
 /* Star Rating */
@@ -486,18 +489,26 @@ const CSS = `
   font-size: 19px; margin: 0 0 10px; padding-right: 30px;
 }
 .mnb .modal .summary {
-  font-size: 13.5px; line-height: 1.7;
-  color: #6ea8fe; /* 淡蓝色：AI 分析的解题思路 */
-  margin-bottom: 14px;
+  font-size: 15px; line-height: 1.9;
+  color: #1b3f7a; /* 加深的深蓝色：AI 分析的解题思路 */
+  margin-bottom: 16px;
+  background: rgba(110, 168, 254, 0.09);
+  border: 1.5px solid rgba(110, 168, 254, 0.3);
+  border-left: 4px solid #6ea8fe;
+  border-radius: 8px;
+  padding: 16px 18px;
+  max-height: 420px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .mnb .modal .summary .ai-badge {
   display: inline-block;
-  font-size: 11px; font-weight: 600;
-  color: #6ea8fe;
-  background: rgba(110, 168, 254, 0.12);
-  border: 1px solid rgba(110, 168, 254, 0.35);
+  font-size: 11px; font-weight: 700;
+  color: #ffffff;
+  background: #4a7fd4;
   border-radius: 4px;
-  padding: 1px 6px;
+  padding: 2px 8px;
   margin-right: 8px;
   vertical-align: 1px;
 }
@@ -627,6 +638,12 @@ const CSS = `
 @keyframes mnbspin { to { transform: rotate(360deg); } }
 
 /* Mastery & Practice */
+.mnb .mastery-light {
+  display: inline-block; border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.85), 0 1px 3px rgba(0,0,0,0.3),
+    inset 0 -2px 3px rgba(0,0,0,0.3), inset 0 2px 2px rgba(255,255,255,0.4);
+  flex-shrink: 0; vertical-align: middle;
+}
 .mnb .mastery-group { display: flex; flex-wrap: wrap; gap: 8px; }
 .mnb .mastery-option {
   display: flex; align-items: center; gap: 5px;
@@ -1170,11 +1187,21 @@ function StarRating({ value, onChange, readonly = false, size = 18 }) {
 
 // ============== PROBLEM CARD ==============
 
-const MASTERY_LABELS = {
-  mastered: '✅ 已掌握',
-  unfamiliar: '❓ 待攻克',
-  practice: '🔄 勤复习',
+// 掌握程度：红/黄/绿三色灯，仅凭灯色即可判断掌握情况
+const MASTERY_META = {
+  mastered: { label: '已掌握', color: '#2E9E5B' }, // 绿灯
+  practice: { label: '勤复习', color: '#D9A013' }, // 黄灯
+  unfamiliar: { label: '待攻克', color: '#D64545' }, // 红灯（默认）
 };
+
+function MasteryLight({ mastery, size = 12 }) {
+  const meta = MASTERY_META[mastery] || MASTERY_META.unfamiliar;
+  return (
+    <span className="mastery-light"
+      style={{ width: size, height: size, background: meta.color }}
+      title={meta.label} />
+  );
+}
 
 function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, reminderLoading, extraFooter }) {
   const isOverdue = showOverdue && problem.is_focus_overdue;
@@ -1194,9 +1221,10 @@ function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, remind
           ))}
         </div>
         <div className="card-meta">
-          {problem.mastery && (
-            <span className="card-mastery">{MASTERY_LABELS[problem.mastery] || problem.mastery}</span>
-          )}
+          <span className="card-mastery">
+            <MasteryLight mastery={problem.mastery} size={13} />
+            <span>{(MASTERY_META[problem.mastery] || MASTERY_META.unfamiliar).label}</span>
+          </span>
           <StarRating value={problem.difficulty} readonly size={14} />
           {(problem.practice_count > 0) && (
             <span className="card-practice">练习 {problem.practice_count} 次</span>
@@ -1478,8 +1506,6 @@ export default function App() {
   const titleSavingRef = useRef(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState('');
-  const [detailNotes, setDetailNotes] = useState('');
-  const detailNotesRef = useRef('');
   const [detailContent, setDetailContent] = useState('');
   const detailContentRef = useRef('');
   const [detailMastery, setDetailMastery] = useState('');
@@ -2048,11 +2074,9 @@ export default function App() {
     setDetailAnalyzeMsg(null);
     setEditingTitle(false);
     setEditTitleValue(p.title || '');
-    setDetailNotes(p.notes || '');
-    detailNotesRef.current = p.notes || '';
     setDetailContent(p.content || '');
     detailContentRef.current = p.content || '';
-    setDetailMastery(p.mastery || '');
+    setDetailMastery(p.mastery || 'unfamiliar');
     setDetailDifficulty(typeof p.difficulty === 'number' ? p.difficulty : 3);
     setDetailPracticeCount(p.practice_count || 0);
     setSolutionText(sol.text || '');
@@ -2163,7 +2187,7 @@ export default function App() {
     try {
       const title = editTitleValue.trim() || '未命名题目';
       const content = detailContentRef.current;
-      const notes = detailNotesRef.current;
+      const notes = detail.notes || ''; // 备注编辑框已移除，保存时保持原值
       const solution = JSON.stringify({
         text: solutionTextRef.current,
         images: solutionImagesRef.current,
@@ -2304,10 +2328,6 @@ export default function App() {
     } finally {
       titleSavingRef.current = false;
     }
-  }
-
-  function saveDetailNotes() {
-    applyDetailDraft({ notes: detailNotesRef.current });
   }
 
   function saveDetailContent() {
@@ -3065,15 +3085,6 @@ export default function App() {
                 <button onClick={addDetailTag}><Plus size={14} /></button>
               </div>
 
-              {/* 备注栏 */}
-              <div className="field">
-                <label className="field-label">备注</label>
-                <textarea rows={3} value={detailNotes}
-                  onChange={(e) => { setDetailNotes(e.target.value); detailNotesRef.current = e.target.value; setDetailDirty(true); }}
-                  onBlur={saveDetailNotes}
-                  placeholder="人工备注，记录解题思路或易错点…" />
-              </div>
-
               <div className="field solution-section">
                 <label className="field-label">解答</label>
                 <textarea
@@ -3114,17 +3125,14 @@ export default function App() {
                 <div className="field" style={{ flex: '1 1 200px', marginBottom: 0 }}>
                   <label className="field-label">掌握程度</label>
                   <div className="mastery-group">
-                    {[
-                      { val: '', label: '未设置' },
-                      { val: 'mastered', label: '✅ 已掌握' },
-                      { val: 'unfamiliar', label: '❓ 待攻克' },
-                      { val: 'practice', label: '🔄 勤复习' },
-                    ].map((opt) => (
-                      <label key={opt.val} className={'mastery-option' + (detailMastery === opt.val ? ' active' : '')}>
-                        <input type="radio" name="mastery" value={opt.val}
-                          checked={detailMastery === opt.val}
-                          onChange={() => saveDetailMastery(opt.val)} />
-                        <span>{opt.label}</span>
+                    {['mastered', 'unfamiliar', 'practice'].map((val) => (
+                      <label key={val} className={'mastery-option' + (detailMastery === val ? ' active' : '')}>
+                        <input type="radio" name="mastery" value={val}
+                          checked={detailMastery === val}
+                          onChange={() => saveDetailMastery(val)} />
+                        <span className="mastery-light"
+                          style={{ width: 11, height: 11, background: MASTERY_META[val].color }} />
+                        <span>{MASTERY_META[val].label}</span>
                       </label>
                     ))}
                   </div>
