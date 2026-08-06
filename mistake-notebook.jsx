@@ -282,8 +282,8 @@ const CSS = `
 
 .mnb .scan-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 18px;
   margin-bottom: 24px;
 }
 .mnb .scan-card {
@@ -297,12 +297,12 @@ const CSS = `
   height: auto; overflow: hidden; background: var(--grid);
   display: flex; align-items: center; justify-content: center;
 }
-.mnb .scan-card .thumb img { width: 100%; height: auto; display: block; max-height: 360px; object-fit: contain; }
+.mnb .scan-card .thumb img { width: 100%; height: auto; display: block; max-height: 720px; object-fit: contain; }
 .mnb .scan-card .info {
-  padding: 8px 10px; font-size: 11px; color: var(--ink-soft);
+  padding: 10px 12px; font-size: 12px; color: var(--ink-soft);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.mnb .scan-card .info .status { font-weight: 600; font-size: 10.5px; }
+.mnb .scan-card .info .status { font-weight: 600; font-size: 11.5px; }
 .mnb .scan-card .info .status.new { color: var(--margin); }
 .mnb .scan-card .info .status.indexed { color: var(--accent-2); }
 .mnb .scan-card-delete-btn {
@@ -442,8 +442,10 @@ const CSS = `
   background: rgba(255, 255, 255, 0.72);
 }
 .mnb .analyze-img {
-  width: 100%; max-height: 300px; object-fit: contain;
-  border-radius: 8px; border: 1.5px solid var(--grid); margin-bottom: 14px;
+  width: 88%; max-height: 640px; object-fit: contain;
+  display: block; margin: 0 auto 14px;
+  border-radius: 8px; border: 1.5px solid var(--grid);
+  cursor: zoom-in;
 }
 .mnb .analyze-btn {
   width: 100%; padding: 10px 14px; border-radius: 7px;
@@ -2577,8 +2579,10 @@ export default function App() {
             {analyzingFile && (
               <div className="analyze-overlay">
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                  <div style={{ flex: '0 0 240px' }}>
-                    <img className="analyze-img" src={API.imageUrl(analyzingFile)} alt="分析中" />
+                  <div style={{ flex: '1 1 640px', minWidth: 320 }}>
+                    <img className="analyze-img" src={API.imageUrl(analyzingFile)} alt="分析中"
+                      onClick={() => setScanPreviewImage(analyzingFile)}
+                      title="点击查看大图（可滚轮缩放）" />
                     {!draft && (
                       <button className="analyze-btn" onClick={() => startAnalyze(analyzingFile)} disabled={analyzing}>
                         {analyzing ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
