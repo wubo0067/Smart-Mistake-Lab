@@ -337,6 +337,18 @@ const CSS = `
 .mnb .subject-filtered-hint { color: var(--margin); font-weight: 600; }
 
 /* Library */
+/* 错题库面板：占满视口剩余高度，仅卡片列表内部滚动，
+   错题本标题、学科标题、学科标签行、搜索栏保持静态 */
+.mnb .panel.library-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 170px);
+  max-height: calc(100vh - 170px);
+  overflow: hidden;
+}
+.mnb .library-panel .subject-page-header { flex-shrink: 0; }
+.mnb .library-panel .subject-tab-bar { flex-shrink: 0; }
+.mnb .library-panel .library-layout { flex: 1; min-height: 0; }
 .mnb .library-toolbar {
   display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
   /* 吸顶：滚动页面时搜索/筛选栏固定在上方，仅错题列表滚动 */
@@ -756,12 +768,12 @@ const CSS = `
 }
 
 /* Library layout: sidebar + main */
-.mnb .library-layout { display: flex; gap: 24px; align-items: flex-start; }
+.mnb .library-layout { display: flex; gap: 24px; align-items: stretch; }
 
 /* Tag sidebar */
 .mnb .tag-sidebar {
-  flex: 0 0 240px; max-height: calc(100vh - 260px);
-  overflow-y: auto; position: sticky; top: 0;
+  flex: 0 0 240px; max-height: none;
+  overflow-y: auto;
   border: 1.5px solid var(--grid); border-radius: 10px;
   padding: 16px; background: rgba(255,255,255,0.6);
 }
@@ -831,8 +843,8 @@ const CSS = `
   font-size: 12.5px; color: var(--pencil); text-align: center; padding: 20px 0;
 }
 
-/* Library main area */
-.mnb .library-main { flex: 1; min-width: 0; }
+/* Library main area：卡片列表在此区域内部滚动 */
+.mnb .library-main { flex: 1; min-width: 0; overflow-y: auto; }
 
 /* mastery select */
 .mnb .mastery-select {
@@ -844,10 +856,13 @@ const CSS = `
 
 /* responsive: sidebar collapses on narrow screens */
 @media (max-width: 860px) {
-  .mnb .library-layout { flex-direction: column; }
+  /* 窄屏下恢复页面整体滚动，避免面板内容被截断 */
+  .mnb .panel.library-panel { height: auto; max-height: none; overflow: visible; }
+  .mnb .library-layout { flex-direction: column; align-items: flex-start; }
   .mnb .tag-sidebar { flex: none; width: 100%; max-height: none; position: static; }
   .mnb .tag-sidebar-list { flex-direction: row; flex-wrap: wrap; gap: 6px; }
   .mnb .sidebar-tag { width: auto; }
+  .mnb .library-main { overflow-y: visible; }
 }
 
 /* ========= Focus Practice ========= */
@@ -2748,7 +2763,7 @@ export default function App() {
         {/* ============ LIBRARY TAB ============ */}
         {tab === 'library' && (() => {
           return (
-            <div className="panel">
+            <div className="panel library-panel">
               {!libLoaded ? (
                 <div className="empty"><Loader2 size={28} className="spin" /><p>加载中…</p></div>
               ) : subjects.length === 0 ? (
