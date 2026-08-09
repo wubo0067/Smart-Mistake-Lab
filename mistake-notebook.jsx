@@ -602,11 +602,17 @@ const CSS = `
   max-width: none; max-height: none;
   display: flex; flex-direction: column;
 }
+/* 放大预览：关闭按钮向右上偏移并缩小，避免遮挡题目图片 */
+.mnb .image-preview-modal.zoomable .modal-close {
+  top: 6px; right: 6px;
+  width: 26px; height: 26px;
+}
 .mnb .zoom-preview-scroll {
   overflow: auto;
   max-width: 92vw;
-  /* 为底部工具栏预留空间，避免工具栏压在图片上 */
-  max-height: calc(92vh - 70px);
+  /* 顶部为关闭按钮让位，底部为工具栏预留空间，避免遮挡图片 */
+  margin-top: 30px;
+  max-height: calc(92vh - 100px);
   border-radius: 8px;
   background:
     repeating-conic-gradient(#f0ede4 0% 25%, #faf8f2 0% 50%) 0 0 / 20px 20px;
