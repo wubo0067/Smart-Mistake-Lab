@@ -486,6 +486,13 @@ const CSS = `
 .mnb .modal img {
   width: 100%; border-radius: 8px; border: 1.5px solid var(--grid); margin-bottom: 14px;
 }
+/* 详情弹窗：关闭按钮稍微向右上偏移，避免遮挡题目图片 */
+.mnb .modal.detail-modal .modal-close {
+  top: 10px; right: 10px;
+}
+.mnb .modal.detail-modal > img {
+  margin-top: 14px;
+}
 .mnb .modal h2 {
   font-family: "Songti SC", "STSong", serif;
   font-size: 19px; margin: 0 0 10px; padding-right: 30px;
@@ -3007,7 +3014,7 @@ export default function App() {
               <ChevronRight size={20} />
             </button>
 
-            <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal detail-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-close" onClick={closeDetailModal}><X size={16} /></div>
               <img src={API.imageUrl(detail.file_path)} alt={detail.title}
                 onDoubleClick={() => setPreviewSolutionImage(detail.file_path)}
