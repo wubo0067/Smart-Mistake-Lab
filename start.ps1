@@ -46,15 +46,67 @@ for ($index = 0; $index -lt $RemainingArgs.Count; $index++) {
     }
 }
 
+$ErrorActionPreference = "Stop"
+
+function Resolve-CommandPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $command = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    return $Name
+}
+
+function Join-NativeArgumentList {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    return ($Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            '"{0}"' -f ($_ -replace '"', '\\"')
+        }
+        else {
+            $_
+        }
+    }) -join ' '
+}
+
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ServerDir = Join-Path $RootDir "server"
 $BackendHost = if ($Ip) { $Ip } else { "127.0.0.1" }
 $FrontendHost = if ($Ip) { $Ip } else { "localhost" }
-$BackendCommand = if ($Ip) {
-    "cd '$($ServerDir -replace "'", "''")'; uv run python server.py --host '$($Ip -replace "'", "''")'"
+
+$PowerShellExe = if (Test-Path "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe") {
+    "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe"
 }
 else {
-    "cd '$($ServerDir -replace "'", "''")'; uv run python server.py"
+    Resolve-CommandPath -Name "powershell.exe"
+}
+
+$WTExe = Resolve-CommandPath -Name "wt.exe"
+$UVExe = Resolve-CommandPath -Name "uv.exe"
+$NpmExe = if (Test-Path "$env:ComSpec") {
+    "npm.cmd"
+}
+else {
+    Resolve-CommandPath -Name "npm"
+}
+
+$BackendCommand = "Set-Location '$($ServerDir -replace "'", "''")'; & '$($UVExe -replace "'", "''")' run python server.py"
+if ($Ip) {
+    $BackendCommand += " --host '$($Ip -replace "'", "''")'"
+}
+
+$BackendCmdOnly = "& '$($UVExe -replace "'", "''")' run python server.py"
+if ($Ip) {
+    $BackendCmdOnly += " --host '$($Ip -replace "'", "''")'"
 }
 
 Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
@@ -65,27 +117,23 @@ Write-Host ""
 # ─── 启动后端 ────────────────────────────────────
 if (-not $NoBackend) {
     Write-Host "▸ [1/2] 启动后端服务 (FastAPI) ..." -ForegroundColor Green
-    $BackendCmdOnly = "uv run python server.py"
-    if ($Ip) {
-        $BackendCmdOnly += " --host '$Ip'"
-    }
-
     # 构建 WT 参数：-w 0 (当前窗口) new-tab (新标签) -d (工作目录)
     $wtArgs = @(
         "-w", "0",
         "new-tab",
         "-d", $ServerDir,
-        "powershell.exe", "-NoExit", "-Command", "& { $BackendCmdOnly }"
+        $PowerShellExe, "-NoExit", "-Command", "& { $BackendCmdOnly }"
     )
 
     try {
-        Start-Process wt -ArgumentList $wtArgs -ErrorAction Stop
+        Start-Process $WTExe -ArgumentList (Join-NativeArgumentList -Arguments $wtArgs) -ErrorAction Stop
         Write-Host "  ✓ 后端服务已在 Windows Terminal 新标签页中启动" -ForegroundColor DarkGreen
     }
     catch {
         # 如果用户没用 Windows Terminal，就尝试传统的 Start-Process 模式防止脚本崩溃
         Write-Warning "无法使用 Windows Terminal 启动新标签，正在尝试传统窗口模式..."
-        Start-Process powershell -ArgumentList @("-NoExit", "-Command", $BackendCommand)
+        $fallbackArgs = @("-NoExit", "-Command", $BackendCommand)
+        Start-Process $PowerShellExe -ArgumentList (Join-NativeArgumentList -Arguments $fallbackArgs)
     }
 
     Write-Host ""
@@ -100,7 +148,13 @@ if (-not $NoFrontend) {
     $FrontendUrl = "http://$($FrontendHost):5173"
     Write-Host "  正在尝试打开浏览器访问: $FrontendUrl" -ForegroundColor Gray
     try {
-        Start-Process chrome $FrontendUrl 2>$null
+        $chromeExe = Resolve-CommandPath -Name "chrome"
+        if ($chromeExe -and $chromeExe -ne "chrome") {
+            Start-Process $chromeExe $FrontendUrl 2>$null
+        }
+        else {
+            Start-Process $FrontendUrl 2>$null
+        }
     }
     catch {
         # If Chrome fails, try to open the default browser with the URL
@@ -121,10 +175,10 @@ if (-not $NoFrontend) {
     try {
         if ($Ip) {
             $env:SMART_MISTAKE_LAB_HOST = $Ip
-            npm run dev -- --host $Ip
+            & $NpmExe run dev -- --host $Ip
         }
         else {
-            npm run dev
+            & $NpmExe run dev
         }
     }
     finally {
