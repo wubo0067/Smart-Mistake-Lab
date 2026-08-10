@@ -10,7 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # 加载项目根目录的 .env 文件
-load_dotenv(Path(__file__).parent.parent / '.env')
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,23 +19,34 @@ from fastapi.staticfiles import StaticFiles
 import db
 from log import logger
 from llm import AiConfig, analyze_image, generate_encouragements
+from path_resolver import resolve_image_path
 
 
 def _generate_solution_filename(original_path: str, index: int, ext: str) -> str:
     stem = Path(original_path).stem
     return f"{stem}_sol_{index}.{ext}"
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理（替代已弃用的 on_event）"""
     logger.info("Smart Mistake Lab Server 初始化本地数据库...")
     db.init_db()
+    image_dir = db.get_config_value("image_dir") or ""
+    if image_dir:
+        migrated = db.migrate_existing_paths_to_relative(image_dir)
+        if migrated:
+            logger.info(f"已将 {migrated} 条图片记录从绝对路径迁移为相对路径")
     image_cfg = AiConfig.for_image_analysis()
     problem_cfg = AiConfig.for_problem_analysis()
-    logger.info(f"AI 配置（图片题目提取）：api_url={image_cfg.api_url}, model={image_cfg.model}, "
-                f"has_api_key={'Yes' if image_cfg.api_key else 'No'}, timeout={image_cfg.timeout}s, max_tokens={image_cfg.max_tokens}")
-    logger.info(f"AI 配置（解题分析）：api_url={problem_cfg.api_url}, model={problem_cfg.model}, "
-                f"has_api_key={'Yes' if problem_cfg.api_key else 'No'}, timeout={problem_cfg.timeout}s, max_tokens={problem_cfg.max_tokens}")
+    logger.info(
+        f"AI 配置（图片题目提取）：api_url={image_cfg.api_url}, model={image_cfg.model}, "
+        f"has_api_key={'Yes' if image_cfg.api_key else 'No'}, timeout={image_cfg.timeout}s, max_tokens={image_cfg.max_tokens}"
+    )
+    logger.info(
+        f"AI 配置（解题分析）：api_url={problem_cfg.api_url}, model={problem_cfg.model}, "
+        f"has_api_key={'Yes' if problem_cfg.api_key else 'No'}, timeout={problem_cfg.timeout}s, max_tokens={problem_cfg.max_tokens}"
+    )
     logger.info("Smart Mistake Lab Server 启动完成")
     yield
 
@@ -49,7 +60,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
 
 def _infer_subject(file_path: str) -> str:
@@ -57,8 +68,13 @@ def _infer_subject(file_path: str) -> str:
     image_dir = db.get_config_value("image_dir") or ""
     if not image_dir:
         return ""
+
+    candidate_path = file_path
+    if not os.path.isabs(candidate_path):
+        candidate_path = os.path.join(image_dir, candidate_path)
+
     try:
-        rel = os.path.relpath(file_path, image_dir)
+        rel = os.path.relpath(candidate_path, image_dir)
         parts = rel.replace("\\", "/").split("/")
         return parts[0] if len(parts) > 1 else ""
     except ValueError:
@@ -66,7 +82,7 @@ def _infer_subject(file_path: str) -> str:
 
 
 # 解答图片文件名模式，用于在扫描时排除（避免解答图被当成错题扫出来）
-_SOLUTION_IMAGE_PATTERN = re.compile(r'_sol_\d+\.\w+$', re.IGNORECASE)
+_SOLUTION_IMAGE_PATTERN = re.compile(r"_sol_\d+\.\w+$", re.IGNORECASE)
 
 
 def _is_solution_image(filename: str) -> bool:
@@ -84,7 +100,9 @@ def _scan_images_in_dir(directory: str, indexed_paths: set) -> list:
             ext = os.path.splitext(f)[1].lower()
             if ext in IMAGE_EXTENSIONS:
                 full_path = os.path.normpath(os.path.join(directory, f))
-                if os.path.isfile(full_path) and not os.path.basename(full_path).startswith('.'):
+                if os.path.isfile(full_path) and not os.path.basename(
+                    full_path
+                ).startswith("."):
                     # 跳过解答图片（如 xxx_sol_1.png）
                     if _is_solution_image(f):
                         continue
@@ -96,12 +114,14 @@ def _scan_images_in_dir(directory: str, indexed_paths: set) -> list:
 
 # --- Health ---
 
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
 
 
 # --- Config ---
+
 
 @app.get("/api/config")
 def get_config():
@@ -129,7 +149,9 @@ def update_config(data: dict):
                 db.set_config_value("focus_timeout_hours", str(num))
                 logger.info(f"重点练超时阈值已更新：{num} 小时")
             except (ValueError, TypeError):
-                raise HTTPException(status_code=400, detail="focus_timeout_hours 必须为有效数字")
+                raise HTTPException(
+                    status_code=400, detail="focus_timeout_hours 必须为有效数字"
+                )
     if "focus_max_per_subject" in data:
         val = data["focus_max_per_subject"]
         if val is not None and val != "":
@@ -142,18 +164,23 @@ def update_config(data: dict):
                 db.set_config_value("focus_max_per_subject", str(num))
                 logger.info(f"每学科重点练上限已更新：{num}")
             except (ValueError, TypeError):
-                raise HTTPException(status_code=400, detail="focus_max_per_subject 必须为有效数字")
+                raise HTTPException(
+                    status_code=400, detail="focus_max_per_subject 必须为有效数字"
+                )
     return get_config()
 
 
 # --- Scan ---
+
 
 @app.get("/api/scan")
 def scan_directory():
     image_dir = db.get_config_value("image_dir") or ""
     if not image_dir or not os.path.isdir(image_dir):
         logger.warning(f"图片目录未配置或不存在：{image_dir}")
-        raise HTTPException(status_code=400, detail="图片目录未配置或不存在，请先在配置页面设置")
+        raise HTTPException(
+            status_code=400, detail="图片目录未配置或不存在，请先在配置页面设置"
+        )
 
     indexed_paths = db.get_all_indexed_paths()
 
@@ -172,7 +199,7 @@ def scan_directory():
         sub_path = os.path.join(image_dir, entry)
         if not os.path.isdir(sub_path):
             continue
-        if entry.startswith('.'):
+        if entry.startswith("."):
             continue
         subject = entry
         all_images = _scan_images_in_dir(sub_path, indexed_paths)
@@ -184,20 +211,22 @@ def scan_directory():
             if meta:
                 indexed.append(meta)
             else:
-                unindexed.append({
-                    "file_path": fp,
-                    "file_name": os.path.basename(fp),
-                    "title": "",
-                    "summary": "",
-                    "content": "",
-                    "tags": [],
-                    "notes": "",
-                    "mastery": "",
-                    "practice_count": 0,
-                    "last_practiced_at": None,
-                    "solution": "{}",
-                    "indexed": False,
-                })
+                unindexed.append(
+                    {
+                        "file_path": fp,
+                        "file_name": os.path.basename(fp),
+                        "title": "",
+                        "summary": "",
+                        "content": "",
+                        "tags": [],
+                        "notes": "",
+                        "mastery": "",
+                        "practice_count": 0,
+                        "last_practiced_at": None,
+                        "solution": "{}",
+                        "indexed": False,
+                    }
+                )
 
         by_subject[subject] = {"indexed": indexed, "unindexed": unindexed}
         total_count += len(all_images)
@@ -210,7 +239,7 @@ def scan_directory():
         for f in sorted(os.listdir(image_dir))
         if os.path.isfile(os.path.join(image_dir, f))
         and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
-        and not f.startswith('.')
+        and not f.startswith(".")
     ]
     if root_images:
         indexed = []
@@ -220,34 +249,34 @@ def scan_directory():
             if meta:
                 indexed.append(meta)
             else:
-                unindexed.append({
-                    "file_path": fp,
-                    "file_name": os.path.basename(fp),
-                    "title": "",
-                    "summary": "",
-                    "content": "",
-                    "tags": [],
-                    "notes": "",
-                    "mastery": "",
-                    "practice_count": 0,
-                    "last_practiced_at": None,
-                    "solution": "{}",
-                    "indexed": False,
-                })
+                unindexed.append(
+                    {
+                        "file_path": fp,
+                        "file_name": os.path.basename(fp),
+                        "title": "",
+                        "summary": "",
+                        "content": "",
+                        "tags": [],
+                        "notes": "",
+                        "mastery": "",
+                        "practice_count": 0,
+                        "last_practiced_at": None,
+                        "solution": "{}",
+                        "indexed": False,
+                    }
+                )
         by_subject["未分类"] = {"indexed": indexed, "unindexed": unindexed}
         total_count += len(root_images)
         total_indexed += len(indexed)
         total_unindexed += len(unindexed)
 
     # 预设学科顺序 + 剩余按名称 + 未分类垫底
-    preset = ['数学', '物理', '化学', '英语', '语文']
+    preset = ["数学", "物理", "化学", "英语", "语文"]
     subject_order = [s for s in preset if s in by_subject]
-    remaining = sorted(
-        [s for s in by_subject if s not in preset and s != '未分类']
-    )
+    remaining = sorted([s for s in by_subject if s not in preset and s != "未分类"])
     subject_order.extend(remaining)
-    if '未分类' in by_subject:
-        subject_order.append('未分类')
+    if "未分类" in by_subject:
+        subject_order.append("未分类")
 
     return {
         "image_dir": image_dir,
@@ -263,14 +292,18 @@ def scan_directory():
 
 # --- Serve Image File ---
 
+
 @app.get("/api/image-file")
 def get_image_file(path: str = Query(..., description="图片文件的绝对路径")):
-    if not os.path.isfile(path):
+    image_dir = db.get_config_value("image_dir") or ""
+    resolved_path = resolve_image_path(path, image_dir)
+    if not resolved_path or not os.path.isfile(resolved_path):
         raise HTTPException(status_code=404, detail="文件不存在")
-    return FileResponse(path)
+    return FileResponse(resolved_path)
 
 
 # --- Index / Update / Delete ---
+
 
 @app.post("/api/images/index")
 def index_image(data: dict):
@@ -299,7 +332,20 @@ def index_image(data: dict):
         raise HTTPException(status_code=400, detail="file_path 不能为空")
 
     subject = _infer_subject(file_path)
-    db.mark_indexed(file_path, title, summary, content, tags, notes, mastery, practice_count, last_practiced_at, solution, subject, difficulty)
+    db.mark_indexed(
+        file_path,
+        title,
+        summary,
+        content,
+        tags,
+        notes,
+        mastery,
+        practice_count,
+        last_practiced_at,
+        solution,
+        subject,
+        difficulty,
+    )
     # 扫描加入错题库时不写时间线，仅编辑保存时才记录
     return {"status": "ok"}
 
@@ -326,7 +372,7 @@ def update_image(data: dict):
     # 从错题库或重点练页面打开并编辑保存时，记录时间线
     # source 可选值：'library'（错题库）、'focus'（重点练）、'timeline'（时间线）
     if data.get("source") in ("library", "focus"):
-        db.log_solution_edit(file_path, 'edit_solution')
+        db.log_solution_edit(file_path, "edit_solution")
 
     db.update_image_meta(
         file_path,
@@ -387,8 +433,13 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
     # 3. 安全检查：所有待删除文件必须在 image_dir 下
     norm_image_dir = os.path.normpath(image_dir)
     for fp in files_to_delete:
-        if os.path.normpath(fp) != os.path.normpath(os.path.join(norm_image_dir, os.path.relpath(fp, norm_image_dir))):
-            raise HTTPException(status_code=403, detail=f"安全限制：不允许删除 image_dir 之外的路径：{fp}")
+        if os.path.normpath(fp) != os.path.normpath(
+            os.path.join(norm_image_dir, os.path.relpath(fp, norm_image_dir))
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail=f"安全限制：不允许删除 image_dir 之外的路径：{fp}",
+            )
 
     logger.info(f"[purge] 将彻底删除 {len(files_to_delete)} 个文件：{files_to_delete}")
 
@@ -414,14 +465,14 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
     if file_path in failed:
         raise HTTPException(
             status_code=500,
-            detail=f"原题图片删除失败：{file_path}，索引未删除。已删除：{deleted}, 失败：{failed}"
+            detail=f"原题图片删除失败：{file_path}，索引未删除。已删除：{deleted}, 失败：{failed}",
         )
 
     # 如果解答图片有删除失败，也不删数据库（保持完整性）
     if failed:
         raise HTTPException(
             status_code=500,
-            detail=f"部分文件删除失败，索引未删除。已删除：{deleted}, 失败：{failed}"
+            detail=f"部分文件删除失败，索引未删除。已删除：{deleted}, 失败：{failed}",
         )
 
     # 6. 删除数据库记录
@@ -461,7 +512,9 @@ def get_all_images(
             end_datetime = f"{end_date} 23:59:59"
 
     # 如果有筛选条件则走 search_images，否则全量返回
-    has_search_filter = bool(query.strip() or start_datetime or end_datetime or mastery_param)
+    has_search_filter = bool(
+        query.strip() or start_datetime or end_datetime or mastery_param
+    )
     if has_search_filter:
         items = db.search_images(
             query=query.strip() or None,
@@ -504,7 +557,9 @@ def get_timeline(offset: int = Query(0, description="跳过的天数（0 = 最�
 # --- Focus Practice ---
 
 
-def _calc_overdue_fields(item: dict, timeout_hours: int, now_dt: datetime | None = None):
+def _calc_overdue_fields(
+    item: dict, timeout_hours: int, now_dt: datetime | None = None
+):
     """为单个重点练题目计算超时相关派生字段，原地修改 item"""
     if now_dt is None:
         now_dt = datetime.now()
@@ -536,6 +591,7 @@ def get_focus_practice(subject: str = Query("", description="学科筛选（可�
     items = db.get_focus_practice_images(subject=subject_param)
     for it in items:
         _calc_overdue_fields(it, timeout_hours, now_dt)
+
     # 排序：超时优先，再按超时程度降序，未超时按 focus_marked_at 降序
     def sort_key(it):
         od = it.get("is_focus_overdue", False)
@@ -550,6 +606,7 @@ def get_focus_practice(subject: str = Query("", description="学科筛选（可�
         else:
             fma_key = 0
         return (0 if od else 1, -ih if od else 0, fma_key)
+
     items.sort(key=sort_key)
     overdue_count = sum(1 for it in items if it.get("is_focus_overdue"))
     # 获取各学科重点练摘要
@@ -597,14 +654,19 @@ def toggle_focus_practice(data: dict):
         status_code = 409 if "最多" in result["reason"] else 400
         raise HTTPException(status_code=status_code, detail=result["reason"])
 
-    return {"status": "ok", "count": result["count"], "max_count": result["max_count"], "subject": result.get("subject", "")}
+    return {
+        "status": "ok",
+        "count": result["count"],
+        "max_count": result["max_count"],
+        "subject": result.get("subject", ""),
+    }
 
 
 @app.post("/api/solution-image")
 def upload_solution_image(data: dict):
     file_path = data.get("file_path", "")
     image_data = data.get("image_data", "")
-    ext = (data.get("ext") or "png").lower().lstrip('.')
+    ext = (data.get("ext") or "png").lower().lstrip(".")
 
     if not file_path or not image_data:
         raise HTTPException(status_code=400, detail="file_path 和 image_data 不能为空")
@@ -614,13 +676,13 @@ def upload_solution_image(data: dict):
     directory = os.path.dirname(file_path)
     stem = Path(file_path).stem
     existing_indexes = []
-    pattern = re.compile(rf'^{re.escape(stem)}_sol_(\d+)\.\w+$', re.IGNORECASE)
+    pattern = re.compile(rf"^{re.escape(stem)}_sol_(\d+)\.\w+$", re.IGNORECASE)
     for name in os.listdir(directory):
         match = pattern.match(name)
         if match:
             existing_indexes.append(int(match.group(1)))
     # 使用时间戳索引，避免删除后复用旧文件名导致浏览器缓存命中旧图片
-    time_based_index = int(datetime.now().strftime('%Y%m%d%H%M%S%f'))
+    time_based_index = int(datetime.now().strftime("%Y%m%d%H%M%S%f"))
     seq_index = (max(existing_indexes) + 1) if existing_indexes else 1
     new_index = max(time_based_index, seq_index)
 
@@ -630,14 +692,14 @@ def upload_solution_image(data: dict):
         new_index += 1
         filename = _generate_solution_filename(file_path, new_index, ext)
         save_path = os.path.join(directory, filename)
-    base64_str = re.sub(r'^data:image/\w+;base64,', '', image_data.strip())
+    base64_str = re.sub(r"^data:image/\w+;base64,", "", image_data.strip())
 
     try:
         raw = base64.b64decode(base64_str)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"无效图片数据：{exc}")
 
-    with open(save_path, 'wb') as f:
+    with open(save_path, "wb") as f:
         f.write(raw)
 
     return {"filename": filename, "path": save_path}
@@ -686,11 +748,14 @@ def get_ai_config():
 @app.put("/api/ai-config")
 def update_ai_config(data: dict):
     # 配置页面保持不变；LLM 配置仅由 .env 管理，写请求不再落库
-    logger.warning("[ai-config] 写接口已废弃：LLM 配置仅由 .env 管理，本次修改请求已忽略")
+    logger.warning(
+        "[ai-config] 写接口已废弃：LLM 配置仅由 .env 管理，本次修改请求已忽略"
+    )
     return get_ai_config()
 
 
 # --- AI Analyze ---
+
 
 @app.post("/api/analyze")
 async def analyze(data: dict):
@@ -709,7 +774,9 @@ async def analyze(data: dict):
     problem_config = AiConfig.for_problem_analysis()
 
     subject = _infer_subject(file_path)
-    logger.info(f'[API] 收到分析请求：{file_path}, subject={subject}, 提供 content={"是" if content else "否"}')
+    logger.info(
+        f'[API] 收到分析请求：{file_path}, subject={subject}, 提供 content={"是" if content else "否"}'
+    )
 
     try:
         result = await analyze_image(
@@ -728,7 +795,7 @@ async def analyze(data: dict):
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
-        logger.exception(f'[API] 分析异常：{file_path}')
+        logger.exception(f"[API] 分析异常：{file_path}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -744,6 +811,7 @@ else:
 
 if __name__ == "__main__":
     import uvicorn
+
     parser = argparse.ArgumentParser(description="Smart Mistake Lab Server")
     parser.add_argument("--host", default="127.0.0.1", help="监听地址，默认 127.0.0.1")
     parser.add_argument("--port", type=int, default=8765, help="监听端口，默认 8765")
