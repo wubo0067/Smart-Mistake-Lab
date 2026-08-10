@@ -630,6 +630,13 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 **Q: 支持哪些图片格式？**
 > A: 支持 JPG、PNG、GIF、WebP、BMP 等常见格式。其他格式自动忽略。
 
+**Q: 如何导出数据库中的图片数据做运维检查？**
+> A: 可在 `server` 目录下执行下面的命令，将 `images` 表中的 `id`、`file_path`、`title`、`subject` 导出为 `images.csv`：
+```bash
+cd server
+python -c "import sqlite3,csv; conn=sqlite3.connect('data.db'); rows=conn.execute('SELECT id,file_path,title,subject FROM images').fetchall(); open('images.csv','w',newline='',encoding='utf-8-sig').write('id,file_path,title,subject\n' + ''.join([','.join(map(str,r))+'\n' for r in rows]))"
+```
+
 ## 📝 开发与贡献
 
 本项目欢迎贡献！如有 Bug 报告、功能建议或代码改进，请：
