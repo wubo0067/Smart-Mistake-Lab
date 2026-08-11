@@ -324,9 +324,17 @@ const CSS = `
 
 /* Subject page header */
 .mnb .subject-page-header {
-  display: flex; align-items: baseline; gap: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
   margin-bottom: 16px; padding-bottom: 12px;
   border-bottom: 2px solid var(--grid);
+}
+.mnb .subject-title-block {
+  display: flex; align-items: baseline; gap: 10px;
+  flex-shrink: 0; white-space: nowrap;
 }
 .mnb .subject-page-title {
   margin: 0; font-size: 20px; font-weight: 800; color: var(--ink);
@@ -347,7 +355,6 @@ const CSS = `
   overflow: hidden;
 }
 .mnb .library-panel .subject-page-header { flex-shrink: 0; }
-.mnb .library-panel .subject-tab-bar { flex-shrink: 0; }
 .mnb .library-panel .library-layout { flex: 1; min-height: 0; }
 .mnb .library-toolbar {
   display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
@@ -748,10 +755,11 @@ const CSS = `
   .mnb .scan-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 
-/* Subject tab bar (library) */
+/* Subject tab bar (library)：与学科标题同行显示，占满剩余空间靠右排列 */
 .mnb .subject-tab-bar {
-  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px;
-  padding-bottom: 14px; border-bottom: 2px solid var(--grid);
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px;
+  flex: 1; min-width: 0; margin-bottom: 0; padding-bottom: 0;
+  border-bottom: none;
 }
 
 /* Focus subject sections */
@@ -2777,26 +2785,27 @@ export default function App() {
                 <div className="empty"><BookOpen size={40} /><p>还没有索引任何错题，去"扫描"页面导入吧</p></div>
               ) : (
                 <>
-                  {/* ---- 学科标题 + 统计 ---- */}
+                  {/* ---- 学科标题 + 统计 + 学科分类按钮：同一行显示 ---- */}
                   <div className="subject-page-header">
-                    <h2 className="subject-page-title">{getSubjectLabel()}</h2>
-                    <span className="subject-page-stats">
-                      共 {allIndexed.length} 题
-                      {filtered.length !== allIndexed.length && (
-                        <span className="subject-filtered-hint">，当前筛出 {filtered.length} 题</span>
-                      )}
-                    </span>
-                  </div>
-
-                  {/* 学科主标签行 */}
-                  <div className="subject-tab-bar">
-                    {subjects.map((s) => (
-                      <button key={s.name}
-                        className={'filter-pill' + (activeSubject === s.name ? ' active' : '')}
-                        onClick={() => switchSubject(s.name)}>
-                        {s.name}<span className="count-badge">{s.total_count}</span>
-                      </button>
-                    ))}
+                    <div className="subject-title-block">
+                      <h2 className="subject-page-title">{getSubjectLabel()}</h2>
+                      <span className="subject-page-stats">
+                        共 {allIndexed.length} 题
+                        {filtered.length !== allIndexed.length && (
+                          <span className="subject-filtered-hint">，当前筛出 {filtered.length} 题</span>
+                        )}
+                      </span>
+                    </div>
+                    {/* 学科主标签行 */}
+                    <div className="subject-tab-bar">
+                      {subjects.map((s) => (
+                        <button key={s.name}
+                          className={'filter-pill' + (activeSubject === s.name ? ' active' : '')}
+                          onClick={() => switchSubject(s.name)}>
+                          {s.name}<span className="count-badge">{s.total_count}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* 左右布局：左侧知识点侧栏 + 右侧主区 */}
