@@ -614,12 +614,34 @@ const CSS = `
   top: 6px; right: 6px;
   width: 26px; height: 26px;
 }
+/* 拖拽手柄：可按住移动整个预览窗口 */
+.mnb .image-preview-modal.zoomable .zoom-preview-handle {
+  display: flex; align-items: center; gap: 8px;
+  height: 24px; padding: 2px 36px 0 10px;
+  cursor: move; user-select: none; -webkit-user-select: none;
+  color: var(--ink-soft); font-size: 12px;
+  border-radius: 8px 8px 0 0;
+  flex-shrink: 0;
+}
+.mnb .image-preview-modal.zoomable .zoom-preview-handle:hover {
+  background: rgba(220, 231, 242, 0.45);
+}
+.mnb .image-preview-modal.zoomable .zoom-preview-handle:active {
+  cursor: grabbing;
+}
+.mnb .zoom-preview-handle-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 55vw;
+}
+.mnb .zoom-preview-handle-hint {
+  margin-left: auto; font-size: 11px; color: var(--pencil); white-space: nowrap;
+}
 .mnb .zoom-preview-scroll {
   overflow: auto;
   max-width: 92vw;
-  /* 顶部为关闭按钮让位，底部为工具栏预留空间，避免遮挡图片 */
-  margin-top: 30px;
-  max-height: calc(92vh - 100px);
+  /* 顶部为拖拽手柄让位，底部为工具栏预留空间，避免遮挡图片 */
+  margin-top: 6px;
+  max-height: calc(92vh - 116px);
   border-radius: 8px;
   background:
     repeating-conic-gradient(#f0ede4 0% 25%, #faf8f2 0% 50%) 0 0 / 20px 20px;
@@ -1304,6 +1326,56 @@ function ZoomableImagePreview({ src, alt, onClose }) {
   const natRef = useRef(null);
   natRef.current = nat;
 
+  // 拖拽移动预览窗口
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef(null);
+
+  function onDragStart(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: offset.x,
+      origY: offset.y,
+    };
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragEnd);
+  }
+
+  function onDragMove(e) {
+    const d = dragRef.current;
+    if (!d) return;
+    let x = d.origX + (e.clientX - d.startX);
+    let y = d.origY + (e.clientY - d.startY);
+    // 边界限制：窗口整体不超出视口（基于当前窗口尺寸夹紧）
+    const el = dialogRef.current;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      if (r.width < vw) {
+        const half = (vw - r.width) / 2;
+        x = Math.max(-half, Math.min(half, x));
+      } else {
+        x = 0;
+      }
+      if (r.height < vh) {
+        const half = (vh - r.height) / 2;
+        y = Math.max(-half, Math.min(half, y));
+      } else {
+        y = 0;
+      }
+    }
+    setOffset({ x, y });
+  }
+
+  function onDragEnd() {
+    dragRef.current = null;
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', onDragEnd);
+  }
+
   const ZOOM_MIN = 0.05;
   const ZOOM_MAX = 10;
   const ZOOM_STEP = 1.25;
@@ -1420,8 +1492,14 @@ function ZoomableImagePreview({ src, alt, onClose }) {
     <div className="image-preview-overlay" onClick={onClose}>
       <div className="image-preview-modal zoomable" ref={dialogRef} tabIndex={-1}
         role="dialog" aria-modal="true" aria-label={alt || '图片预览'}
-        onClick={(e) => e.stopPropagation()}>
+        onClick={(e) => e.stopPropagation()}
+        style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}>
         <button className="modal-close" onClick={onClose} title="关闭 (Esc)"><X size={16} /></button>
+        <div className="zoom-preview-handle" onMouseDown={onDragStart}
+          title="按住拖动移动预览窗口">
+          <span className="zoom-preview-handle-title">{alt || '图片预览'}</span>
+          <span className="zoom-preview-handle-hint">按住拖动移动</span>
+        </div>
         <div
           ref={scrollRef}
           className="zoom-preview-scroll"
@@ -1626,7 +1704,8 @@ export default function App() {
         setTotalIndexedCount(data.length);
       } else {
         setAllIndexed(data.items || []);
-        setTotalIndexedCount(data.total_count ?? 0);
+        // tab 上显示所有科目总数量，列表数量用 total_count 表示筛选后的数量
+        setTotalIndexedCount(data.global_count ?? data.total_count ?? 0);
         if (data.subjects) setSubjects(data.subjects);
       }
     } catch (e) {

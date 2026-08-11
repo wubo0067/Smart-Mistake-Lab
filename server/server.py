@@ -507,6 +507,8 @@ def get_all_images(
 
     # 错题库总数（按当前学科 + 掌握程度条件统计）
     total_count = db.get_total_image_count(subject=subject_param, mastery=mastery_param)
+    # 全局总数（所有科目，用于顶部"错题库"标签页计数）
+    global_count = db.get_total_image_count()
 
     # 构造日期时间字符串：开始日 00:00:00，结束日 23:59:59
     start_datetime = None
@@ -538,6 +540,7 @@ def get_all_images(
     return {
         "items": items,
         "total_count": total_count,
+        "global_count": global_count,
         "filtered_count": len(items),
         "subjects": subjects,
     }
