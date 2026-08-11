@@ -399,12 +399,14 @@ def mark_indexed(
 
 
 def migrate_existing_paths_to_relative(image_dir: str | None = None) -> int:
-    """将数据库中现有的绝对路径迁移为相对路径。"""
+    """将数据库中现有的绝对路径迁移为相对路径（images 与 practice_log）。"""
     conn = get_db()
     try:
         image_dir = image_dir or get_config_value("image_dir") or ""
-        rows = conn.execute("SELECT id, file_path FROM images").fetchall()
         updated = 0
+
+        # images 表
+        rows = conn.execute("SELECT id, file_path FROM images").fetchall()
         for row in rows:
             original_path = row["file_path"] or ""
             if not original_path or not os.path.isabs(original_path):
@@ -417,6 +419,25 @@ def migrate_existing_paths_to_relative(image_dir: str | None = None) -> int:
                 (storage_path, row["id"]),
             )
             updated += 1
+
+        # practice_log 表：时间线依赖其与 images.file_path 的精确匹配，
+        # 若不迁移，从旧机器拷贝来的日志会因路径不一致而全部被跳过
+        rows = conn.execute(
+            "SELECT id, file_path FROM practice_log WHERE file_path IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            original_path = row["file_path"] or ""
+            if not original_path or not os.path.isabs(original_path):
+                continue
+            storage_path = to_db_image_path(original_path, image_dir)
+            if storage_path == original_path:
+                continue
+            conn.execute(
+                "UPDATE practice_log SET file_path = ? WHERE id = ?",
+                (storage_path, row["id"]),
+            )
+            updated += 1
+
         conn.commit()
         return updated
     finally:
@@ -666,9 +687,10 @@ def log_solution_edit(file_path: str, action: str = "edit_solution"):
     action: 'edit_solution' - 解答文字/图片变更（统一记录）
     """
     conn = get_db()
+    storage_path = to_db_image_path(file_path, get_config_value("image_dir") or "")
     conn.execute(
         "INSERT INTO practice_log (file_path, action, created_at) VALUES (?, ?, ?)",
-        (file_path, action, _now()),
+        (storage_path, action, _now()),
     )
     conn.commit()
     conn.close()
