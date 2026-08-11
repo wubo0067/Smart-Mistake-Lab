@@ -137,6 +137,9 @@ def update_config(data: dict):
     if "image_dir" in data:
         db.set_config_value("image_dir", data["image_dir"])
         logger.info(f"图片目录已更新：{data['image_dir']}")
+        migrated = db.migrate_existing_paths_to_relative(data["image_dir"])
+        if migrated:
+            logger.info(f"配置更新后已迁移 {migrated} 条图片路径为相对路径")
     if "focus_timeout_hours" in data:
         val = data["focus_timeout_hours"]
         if val is not None and val != "":
@@ -181,6 +184,10 @@ def scan_directory():
         raise HTTPException(
             status_code=400, detail="图片目录未配置或不存在，请先在配置页面设置"
         )
+
+    migrated = db.migrate_existing_paths_to_relative(image_dir)
+    if migrated:
+        logger.info(f"扫描前已迁移 {migrated} 条图片路径为相对路径")
 
     indexed_paths = db.get_all_indexed_paths()
 

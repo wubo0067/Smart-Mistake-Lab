@@ -2,6 +2,29 @@ import os
 from pathlib import Path
 
 
+def _extract_relative_from_anchor(file_path: str, image_dir: str) -> str:
+    """按图片根目录名提取相对路径，兼容跨机器/跨盘符迁移。"""
+    anchor = os.path.basename(os.path.normpath(image_dir))
+    if not anchor:
+        return ""
+
+    parts = [
+        part
+        for part in os.path.normpath(file_path).replace("\\", "/").split("/")
+        if part
+    ]
+    anchor_lower = anchor.lower()
+    for index in range(len(parts) - 1, -1, -1):
+        if parts[index].lower() != anchor_lower:
+            continue
+        rel_parts = parts[index + 1 :]
+        if rel_parts:
+            return "/".join(rel_parts)
+        break
+
+    return ""
+
+
 def to_db_image_path(file_path: str, image_dir: str | None = None) -> str:
     """将绝对文件路径转换为相对路径，便于跨机器迁移数据库。"""
     if not file_path:
@@ -24,6 +47,10 @@ def to_db_image_path(file_path: str, image_dir: str | None = None) -> str:
             return rel_path.replace("\\", "/")
     except ValueError:
         pass
+
+    anchored_rel_path = _extract_relative_from_anchor(normalized_input, normalized_dir)
+    if anchored_rel_path:
+        return anchored_rel_path
 
     return normalized_input
 
