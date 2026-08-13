@@ -3,7 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from path_resolver import resolve_image_path, to_db_image_path
+from path_resolver import (
+    is_path_within_directory,
+    resolve_image_path,
+    to_db_image_path,
+)
 
 
 class ResolveImagePathTests(unittest.TestCase):
@@ -39,6 +43,18 @@ class ResolveImagePathTests(unittest.TestCase):
             resolved = resolve_image_path(existing_path, tmpdir)
 
             self.assertEqual(resolved, existing_path)
+
+    def test_cross_drive_paths_are_rejected_without_crashing(self):
+        self.assertFalse(
+            is_path_within_directory(
+                r"D:\images\math\problem1.jpg", r"E:\mistake-images"
+            )
+        )
+        self.assertFalse(
+            is_path_within_directory(
+                r"E:\mistake-images\math\problem1.jpg", r"D:\mistake-images"
+            )
+        )
 
 
 if __name__ == "__main__":

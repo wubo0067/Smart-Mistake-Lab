@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 import db
 from log import logger
 from llm import AiConfig, analyze_image, generate_encouragements
-from path_resolver import resolve_image_path
+from path_resolver import is_path_within_directory, resolve_image_path
 
 
 def _generate_solution_filename(original_path: str, index: int, ext: str) -> str:
@@ -437,12 +437,16 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             sol_path = os.path.join(os.path.dirname(file_path), img_name)
             files_to_delete.append(os.path.normpath(sol_path))
 
-    # 3. 安全检查：所有待删除文件必须在 image_dir 下
+    # 3. 安全检查：所有待删除文件必须在 image_dir 下；不同盘符/挂载要直接拒绝，不抛 ValueError
     norm_image_dir = os.path.normpath(image_dir)
     for fp in files_to_delete:
-        if os.path.normpath(fp) != os.path.normpath(
-            os.path.join(norm_image_dir, os.path.relpath(fp, norm_image_dir))
-        ):
+        normalized_fp = os.path.normpath(fp)
+        if not os.path.isabs(normalized_fp):
+            normalized_fp = os.path.normpath(
+                os.path.join(norm_image_dir, normalized_fp)
+            )
+
+        if not is_path_within_directory(normalized_fp, norm_image_dir):
             raise HTTPException(
                 status_code=403,
                 detail=f"安全限制：不允许删除 image_dir 之外的路径：{fp}",

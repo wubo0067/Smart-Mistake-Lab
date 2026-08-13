@@ -2,6 +2,25 @@ import os
 from pathlib import Path
 
 
+def is_path_within_directory(file_path: str, image_dir: str) -> bool:
+    """Return True only when file_path is inside image_dir, even across machines or drive letters."""
+    if not file_path or not image_dir:
+        return False
+
+    candidate = os.path.normpath(file_path)
+    root = os.path.normpath(image_dir)
+
+    if not os.path.isabs(candidate):
+        candidate = os.path.normpath(os.path.join(root, candidate))
+
+    try:
+        rel = os.path.relpath(candidate, root)
+    except ValueError:
+        return False
+
+    return rel == "." or (not rel.startswith("..") and not os.path.isabs(rel))
+
+
 def _extract_relative_from_anchor(file_path: str, image_dir: str) -> str:
     """按图片根目录名提取相对路径，兼容跨机器/跨盘符迁移。"""
     anchor = os.path.basename(os.path.normpath(image_dir))
