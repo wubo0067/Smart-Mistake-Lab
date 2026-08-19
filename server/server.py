@@ -778,7 +778,11 @@ async def analyze(data: dict):
     if not file_path:
         raise HTTPException(status_code=400, detail="file_path 不能为空")
 
-    if not os.path.isfile(file_path):
+    # 兼容数据库中的相对路径（如 物理/xxx.jpg）：按 image_dir 解析为绝对路径，
+    # 与 /api/image-file 保持一致，避免相对路径按进程工作目录查找导致 404
+    image_dir = db.get_config_value("image_dir") or ""
+    resolved_path = resolve_image_path(file_path, image_dir)
+    if not resolved_path or not os.path.isfile(resolved_path):
         raise HTTPException(status_code=404, detail=f"图片文件不存在：{file_path}")
 
     # 可选：调用方提供的题目内容（非空时跳过图片提取）
@@ -787,14 +791,14 @@ async def analyze(data: dict):
     image_config = AiConfig.for_image_analysis()
     problem_config = AiConfig.for_problem_analysis()
 
-    subject = _infer_subject(file_path)
+    subject = _infer_subject(resolved_path)
     logger.info(
-        f'[API] 收到分析请求：{file_path}, subject={subject}, 提供 content={"是" if content else "否"}'
+        f'[API] 收到分析请求：{file_path} -> {resolved_path}, subject={subject}, 提供 content={"是" if content else "否"}'
     )
 
     try:
         result = await analyze_image(
-            file_path,
+            resolved_path,
             image_config=image_config,
             problem_config=problem_config,
             subject=subject,
