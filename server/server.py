@@ -684,11 +684,16 @@ def upload_solution_image(data: dict):
 
     if not file_path or not image_data:
         raise HTTPException(status_code=400, detail="file_path 和 image_data 不能为空")
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="原题图片不存在")
 
-    directory = os.path.dirname(file_path)
-    stem = Path(file_path).stem
+    # 兼容数据库中的相对路径（如 物理/xxx.jpg）：按 image_dir 解析为绝对路径，
+    # 避免相对路径按进程工作目录查找导致 404（与 /api/image-file 一致）
+    image_dir = db.get_config_value("image_dir") or ""
+    resolved_path = resolve_image_path(file_path, image_dir)
+    if not resolved_path or not os.path.isfile(resolved_path):
+        raise HTTPException(status_code=404, detail=f"原题图片不存在：{file_path}")
+
+    directory = os.path.dirname(resolved_path)
+    stem = Path(resolved_path).stem
     existing_indexes = []
     pattern = re.compile(rf"^{re.escape(stem)}_sol_(\d+)\.\w+$", re.IGNORECASE)
     for name in os.listdir(directory):
@@ -700,11 +705,11 @@ def upload_solution_image(data: dict):
     seq_index = (max(existing_indexes) + 1) if existing_indexes else 1
     new_index = max(time_based_index, seq_index)
 
-    filename = _generate_solution_filename(file_path, new_index, ext)
+    filename = _generate_solution_filename(resolved_path, new_index, ext)
     save_path = os.path.join(directory, filename)
     while os.path.exists(save_path):
         new_index += 1
-        filename = _generate_solution_filename(file_path, new_index, ext)
+        filename = _generate_solution_filename(resolved_path, new_index, ext)
         save_path = os.path.join(directory, filename)
     base64_str = re.sub(r"^data:image/\w+;base64,", "", image_data.strip())
 
@@ -721,11 +726,14 @@ def upload_solution_image(data: dict):
 
 @app.delete("/api/solution-image")
 def delete_solution_image(path: str = Query(..., description="解答图片的绝对路径")):
-    if not os.path.isfile(path):
+    # 兼容相对路径（如 物理/xxx_sol_1.png）：按 image_dir 解析为绝对路径
+    image_dir = db.get_config_value("image_dir") or ""
+    resolved_path = resolve_image_path(path, image_dir)
+    if not resolved_path or not os.path.isfile(resolved_path):
         # 幂等删除：文件已不存在时也返回成功，方便前端清理数据库中的历史引用
         logger.info(f"[solution-image] 文件不存在，按已删除处理：{path}")
         return {"status": "ok", "missing": True}
-    os.remove(path)
+    os.remove(resolved_path)
     return {"status": "ok"}
 
 
