@@ -16,7 +16,6 @@ import httpx
 
 from log import logger
 
-
 # ============== Prompt 管理 ==============
 
 # ============== 各学科知识点 ==============
@@ -38,11 +37,9 @@ MATH_KNOWLEDGE_POINTS = [
     "翻折图形，同步信息，连接对称点",
     "遇到梯形想平移",
     "遇到中线想倍长",
-
     "中点辅助线：中线倍长",
     "中点辅助线：直角三角形斜边中线",
     "中点辅助线：中位线",
-
     # ==========================================
     # 一。五、全等三角形（核心扩充：模型、辅助线与技巧）
     # ==========================================
@@ -53,7 +50,6 @@ MATH_KNOWLEDGE_POINTS = [
     "全等 ASA（角边角）",
     "全等 AAS（角角边）",
     "全等 HL（斜边、直角边，仅限直角三角形）",
-
     # 2. 经典基础模型
     "全等模型：平移模型",
     "全等模型：轴对称/翻折模型",
@@ -62,7 +58,6 @@ MATH_KNOWLEDGE_POINTS = [
     "全等模型：公共角/对顶角模型",
     "全等模型：角平分线 + 垂线模型",
     "全等模型：角平分线 + 平行线模型",
-
     # 3. 压轴高阶模型（中考必考）
     "全等高阶模型：手拉手模型",
     "全等高阶模型：截长补短模型",
@@ -72,7 +67,6 @@ MATH_KNOWLEDGE_POINTS = [
     "全等高阶模型：婆罗摩笈多模型",
     "全等高阶模型：对角互补模型",
     "全等高阶模型：角含半角模型",
-
     # 4. 辅助线技巧与解题套路
     "全等辅助线技巧 1：遇中线想倍长，构造 8 字型全等（或构造平行四边形），实现边角转移",
     "全等辅助线技巧 2：遇角平分线想对称（翻折），在角的一边截取等长线段构造全等，转移边角",
@@ -83,7 +77,6 @@ MATH_KNOWLEDGE_POINTS = [
     "全等解题套路 2：证明线段相等，优先找全等；若无直接全等，寻找中间线段代换（等量代换）",
     "全等解题套路 3：证明角相等，优先找全等；若无直接全等，利用等角的余角/补角相等，或平行线性质",
     "全等解题套路 4：证明线段平行，优先找内错角/同位角相等，通过全等转移角的关系",
-
     # 5. 易错点与避坑指南
     "全等避坑 1：书写全等符号时，对应顶点字母必须严格对齐，如△ABC≌△DEF，绝不能写错顺序",
     "全等避坑 2：SAS 判定中，角必须是两边的【夹角】，SSA（边边角）和 AAA（角角角）绝对不能判定全等",
@@ -91,7 +84,6 @@ MATH_KNOWLEDGE_POINTS = [
     "全等避坑 4：动点全等分类讨论，题目仅告知两三角形全等而未指明对应顶点时，必须按对应边/角相等分情况讨论（通常有 2-3 种情况）",
     "全等避坑 5：注意图形变换（平移、旋转、翻折）中的隐含等量关系，不要漏掉旋转角、对称轴等隐含条件",
     "全等避坑 6：证明全等时，切忌使用“SSA”或“AAA”，这是中考选择题和填空题最爱设置的陷阱",
-
     # ==========================================
     # 二、相似三角形（核心扩充：模型、辅助线与技巧）
     # ==========================================
@@ -102,7 +94,6 @@ MATH_KNOWLEDGE_POINTS = [
     "平行线分线段成比例定理：三条平行线截两条直线，所得对应线段成比例",
     "相似三角形性质：对应线段（高/中线/角平分线）的比等于相似比",
     "相似三角形性质：周长的比等于相似比，面积的比等于相似比的平方",
-
     # 2. 经典基础模型
     "相似三角形基础模型：A 字模型",
     "相似三角形基础模型：反 A 字模型",
@@ -110,7 +101,6 @@ MATH_KNOWLEDGE_POINTS = [
     "相似三角形基础模型：反 8 字模型",
     "相似三角形基础模型：角平分线模型",
     "相似三角形基础模型：射影定理",
-
     # 3. 压轴高阶模型（中考必考）
     "相似三角形高阶模型：一线三等角（K 型图）",
     "相似三角形高阶模型：旋转相似（手拉手模型）",
@@ -119,7 +109,6 @@ MATH_KNOWLEDGE_POINTS = [
     "相似三角形高阶模型：弦图模型（赵爽弦图），大正方形内含小正方形，四个直角三角形全等，衍生出多组相似与勾股定理",
     "相似三角形高阶模型：十字架模型，矩形或正方形内两条互相垂直的线段，构造三垂直相似求线段比",
     "相似三角形高阶模型：孤单直角做三垂直构造三角形相似",
-
     # 4. 辅助线技巧与解题套路
     "相似辅助线技巧 1：遇比例想平行，作平行线构造 A 字或 8 字模型，转移线段比例",
     "相似辅助线技巧 2：遇中点想中位线或倍长中线，构造 8 字模型实现线段倍分关系的转化",
@@ -128,13 +117,11 @@ MATH_KNOWLEDGE_POINTS = [
     "相似解题套路 2：若找不到直接相似，寻找中间比进行等量代换（如 a/b=c/d, c/d=e/f => a/b=e/f）",
     "相似解题套路 3：坐标系中的相似，利用解析几何设点坐标表示线段，或利用斜率关系构造 K 型图转化为代数方程",
     "相似与圆综合：切割线定理与相交弦定理的本质是相似，利用圆周角定理找等角构造相似三角形",
-
     # 5. 易错点与避坑指南
     "相似避坑 1：书写相似符号时，对应顶点字母必须严格对齐，如△ABC∽△DEF，绝不能写错顺序",
     "相似避坑 2：动点相似分类讨论，题目仅告知两三角形相似而未指明对应顶点时，必须按对应边成比例分情况讨论（通常有 3 种情况）",
     "相似避坑 3：注意隐含的等角条件，如公共角、对顶角、平行线带来的同位角/内错角、同角或等角的余角/补角",
     "相似避坑 4：求面积比时，务必先求出相似比，面积比等于相似比的平方，切忌将边长比直接当面积比",
-
     # ==========================================
     # 三、函数（一次、反比例、二次）
     # ==========================================
@@ -146,7 +133,6 @@ MATH_KNOWLEDGE_POINTS = [
     "反比例函数图像既是中心对称图形（对称中心是原点）也是轴对称图形（对称轴为 y=x 和 y=-x）",
     "反比例函数与一次函数交点：联立方程求解；比较函数大小用图像上下位置判断",
     "反比例函数与面积结合：作垂线构造矩形或三角形，用 |k| 转移面积",
-
     # --- 反比例函数·面积模型与对称性（补充） ---
     "反比例函数三种常见面积模型：①矩形面积=|k| ②直角三角形面积=|k|/2 ③梯形面积（过两点分别作坐标轴垂线围成）",
     "反比例函数与一次函数围成封闭图形面积：先联立求交点，再用割补法或积分思想（初中用矩形/三角形拼凑）",
@@ -156,7 +142,6 @@ MATH_KNOWLEDGE_POINTS = [
     "反比例函数图像上两点 A(x₁,y₁)、B(x₂,y₂) 与原点构成三角形面积：S=1/2·|x₁y₂-x₂y₁|",
     "反比例函数与一次函数交点的对称性：y=k/x 与 y=mx+n 的两个交点关于原点对称（当 n=0 时）",
     "反比例函数比较大小的陷阱：必须强调'在同一象限内'才能用增减性，跨象限需代入具体值比较",
-
     "二次函数图像与性质",
     "二次函数对称式表达式",
     "二次函数对称轴公式：x = -b/2a",
@@ -175,7 +160,6 @@ MATH_KNOWLEDGE_POINTS = [
     "求二次函数与坐标轴围成图形面积常用铅锤法：S=1/2×水平宽×铅垂高",
     "二次函数与直线交点问题：联立转化为一元二次方程，用判别式判断交点个数",
     "一元二次方程转换为两个函数求交点",
-
     # --- 二次函数·表达式、存在性与最值（补充） ---
     "二次函数交点式：y=a(x-x₁)(x-x₂)，适用于已知抛物线与 x 轴的两个交点 (x₁,0) 和 (x₂,0)",
     "二次函数三种表达式选用策略：已知三点→一般式；已知顶点→顶点式；已知 x 轴两交点→交点式",
@@ -200,7 +184,6 @@ MATH_KNOWLEDGE_POINTS = [
     "二次函数与几何图形面积分割：过抛物线上一点作平行于坐标轴的直线，将不规则图形分割为梯形和三角形",
     "二次函数中'面积相等'问题：同底等高的三角形面积相等，转化为动点到定直线距离相等",
     "二次函数中判断 a、b、c 符号的综合技巧：开口方向→a；对称轴位置→b（左同右异）；y 轴交点→c；特殊点→a+b+c 等",
-
     # ==========================================
     # 四、圆
     # ==========================================
@@ -226,7 +209,6 @@ MATH_KNOWLEDGE_POINTS = [
     "圆中辅助线口诀：遇直径连直角，遇切线连半径，求弦长作垂径，求角找同弧所对圆周角",
     "圆中求弦长：过圆心作弦的垂线（垂径定理），用勾股定理求半弦长再乘 2",
     "圆中求角：圆周角=同弧所对圆心角的一半；圆内接四边形对角互补",
-
     # --- 圆·公式、模型与辅助线（补充） ---
     "圆心角、弧、弦、弦心距的'等对等'定理：在同圆或等圆中，四组量中有一组相等则其余三组对应相等",
     "弦长公式：弦长=2√(r²-d²)，其中 r 为半径，d 为弦心距（圆心到弦的距离）",
@@ -260,7 +242,6 @@ MATH_KNOWLEDGE_POINTS = [
     "圆中'蝴蝶模型'：圆内两条弦相交，形成的对顶三角形相似（由圆周角相等推出）",
     "圆中'燕尾模型'：圆外一点引割线和切线，形成的三角形相似（由弦切角=圆周角推出）",
     "托勒密定理应用技巧：圆内接四边形 ABCD 中，AC·BD=AB·CD+AD·BC，常用于求对角线或证明线段关系",
-
     # ==========================================
     # 五、动点、最值与几何变换
     # ==========================================
@@ -275,7 +256,6 @@ MATH_KNOWLEDGE_POINTS = [
     "托勒密定理",
     "坐标法/参数法表示线段，转化为函数最值问题",
     "坐标系中求三角形面积：割补法或水平宽×铅垂高÷2",
-
     # ==========================================
     # 六、三角形四心、特殊圆与拓展定理
     # ==========================================
@@ -287,7 +267,6 @@ MATH_KNOWLEDGE_POINTS = [
     "构造一元二次方程",
     "梅涅劳斯定理（拓展）：一条直线截三角形的三边（或延长线），三个交点分三边的线段乘积为 1",
     "塞瓦定理（拓展）：三角形内三条共点直线分三边的线段乘积为 1，常用于证明三线共点",
-
     # ==========================================
     # 七、代数、三角函数与思想方法
     # ==========================================
@@ -297,7 +276,6 @@ MATH_KNOWLEDGE_POINTS = [
     "不等式与不等式组",
     "复合二次根式，把复合根号前面的系数变为 2，完全平方公式",
     "柯西不等式",
-
     # --- 锐角三角函数与解直角三角形 ---
     "锐角三角函数定义：sinA=对边/斜边，cosA=邻边/斜边，tanA=对边/邻边",
     "特殊角的三角函数值：30°、45°、60° 的正弦、余弦、正切要熟记",
@@ -306,7 +284,6 @@ MATH_KNOWLEDGE_POINTS = [
     "仰角俯角与坡度坡角：坡度=铅直高度/水平宽度=tanα",
     "解直角三角形记特殊角：30° 角所对直角边是斜边的一半；45° 角是等腰直角三角形",
     "解直角三角形的实际应用：测高、测距问题构造直角三角形，用三角函数列方程",
-
     # --- 锐角三角函数·进阶公式与技巧（补充） ---
     "锐角三角函数增减性：0°<A<90°时，sinA 随 A 增大而增大，cosA 随 A 增大而减小，tanA 随 A 增大而增大",
     "锐角三角函数值域：0<sinA<1，0<cosA<1，tanA>0（锐角范围内）",
@@ -324,17 +301,14 @@ MATH_KNOWLEDGE_POINTS = [
     "二倍角公式：sin2A=2sinAcosA，cos2A=cos²A-sin²A=2cos²A-1=1-2sin²A",
     "半角公式：sin(A/2)=√((1-cosA)/2)，cos(A/2)=√((1+cosA)/2)",
     "和差角公式：sin(A±B)=sinAcosB±cosAsinB，cos(A±B)=cosAcosB∓sinAsinB",
-
     "夹角公式：两直线斜率分别为 k1、k2，夹角正切 tanθ=|(k2-k1)/(1+k1k2)|",
     "两直线垂直则 k1·k2=-1，平行则 k1=k2",
     "二倍角公式（拓展）",
     "存在 90 度角就导角",
-
     # --- 概率与统计 ---
     "概率初步",
     "统计图表分析",
     "加权平均数与方差",
-
     # --- 数学思想方法与通法 ---
     "配凑思想",
     "数形结合思想",
@@ -345,15 +319,37 @@ PHYSICS_KNOWLEDGE_POINTS = [
     # ==========================================
     # 一、力学、声学、光学、热学基础
     # ==========================================
-    "牛顿第一定律", "牛顿第二定律", "牛顿第三定律", "重力与弹力",
-    "摩擦力", "力的合成与分解", "二力平衡", "压强", "液体压强",
-    "大气压强", "浮力", "阿基米德原理", "物体浮沉条件",
-    "功与功率", "机械效率", "动能与势能", "机械能守恒",
-    "杠杆平衡条件", "滑轮组", "斜面", "光的反射", "平面镜成像",
-    "光的折射", "凸透镜成像", "温度与物态变化", "比热容",
-    "热值", "内能与热机", "速度与平均速度", "声音的产生与传播",
+    "牛顿第一定律",
+    "牛顿第二定律",
+    "牛顿第三定律",
+    "重力与弹力",
+    "摩擦力",
+    "力的合成与分解",
+    "二力平衡",
+    "压强",
+    "液体压强",
+    "大气压强",
+    "浮力",
+    "阿基米德原理",
+    "物体浮沉条件",
+    "功与功率",
+    "机械效率",
+    "动能与势能",
+    "机械能守恒",
+    "杠杆平衡条件",
+    "滑轮组",
+    "斜面",
+    "光的反射",
+    "平面镜成像",
+    "光的折射",
+    "凸透镜成像",
+    "温度与物态变化",
+    "比热容",
+    "热值",
+    "内能与热机",
+    "速度与平均速度",
+    "声音的产生与传播",
     "浮力，融化，密度大于就升，密度小于就降，密度相等就不变",
-
     # ==========================================
     # 二、电学基础概念与规律
     # ==========================================
@@ -378,9 +374,9 @@ PHYSICS_KNOWLEDGE_POINTS = [
     "额定功率与实际功率",
     "焦耳定律",
     "家庭电路与安全用电",
-    "磁场与电流的磁场", "电磁感应",
+    "磁场与电流的磁场",
+    "电磁感应",
     "家庭电路：开关接火线，螺丝口灯泡螺旋套接零线，保险丝用电阻率大、熔点低的铅锑合金",
-
     # ==========================================
     # 三、电学进阶技巧与模型（压轴补充）
     # ==========================================
@@ -404,7 +400,6 @@ PHYSICS_KNOWLEDGE_POINTS = [
     "电学计算单位统一原则：必须使用国际单位制（V, A, Ω, J, W），遇到 mA, kW, kW·h 必须先换算",
     "电能表参数计算：如 3000imp/(kW·h) 表示每消耗 1 度电闪烁 3000 次，闪烁 n 次消耗电能 W=n/3000 kW·h",
     "电学解题规范：第一步必须画等效电路图，标出已知量和未知量，理清串并联关系",
-
     # ==========================================
     # 四、浮力进阶与极值模型（最难考点补充）
     # ==========================================
@@ -420,7 +415,6 @@ PHYSICS_KNOWLEDGE_POINTS = [
     "浮力避坑 2：物体沉底时，F 浮 < G 物，容器底对物体有支持力 N = G 物 - F 浮；此时容器对桌面压力 = G 容 + G 液 + G 物（整体法，内力抵消）",
     "浮力避坑 3：空心物体的密度是“平均密度”，计算漂浮条件时，质量是总质量，体积是包含空心部分的总体积",
     "浮力极值问题：求最大浮力通常对应物体刚好完全浸没（V 排=V 物）；求最小拉力通常对应浮力最大时",
-
     # ==========================================
     # 五、比热容与热学进阶技巧（避坑与图像）
     # ==========================================
@@ -432,43 +426,47 @@ PHYSICS_KNOWLEDGE_POINTS = [
     "加热效率问题计算：η = (Q 吸 / Q 放) × 100% = (cmΔt / qm 燃料) × 100% 或 (cmΔt / Pt) × 100%",
     "热学避坑 1：题目中“升高了 20℃”表示Δt=20，“升高到 20℃”表示末温 t=20，审题必须抠字眼",
     "热学避坑 2：热平衡计算前，必须先判断是否有物态变化！如 0℃的冰吸热先熔化（温度不变），不能直接套用 Q=cmΔt 计算升温",
-    "热学避坑 3：燃料燃烧放热公式 Q 放 = qm 中，m 是“实际燃烧”的燃料质量，不是总质量；且实际放热往往小于理论值（因燃烧不充分和热散失）"
+    "热学避坑 3：燃料燃烧放热公式 Q 放 = qm 中，m 是“实际燃烧”的燃料质量，不是总质量；且实际放热往往小于理论值（因燃烧不充分和热散失）",
 ]
 
 CHEMISTRY_KNOWLEDGE_POINTS = [
     # ==========================================
     # 一、物质构成与化学用语（基础基石）
     # ==========================================
-    "物理变化与化学变化", "物质的性质（物理性质与化学性质）",
+    "物理变化与化学变化",
+    "物质的性质（物理性质与化学性质）",
     "分子与原子（分子可分，原子在化学变化中不可分）",
     "原子的结构（质子数=核电荷数=核外电子数）",
     "离子与原子的区别，原子团（根）及常见化合价",
     "元素与元素周期表（周期数=电子层数，族序数=最外层电子数）",
     "相对原子质量与元素化合价",
-    "化合价与化学式", "有关化学式的计算（元素质量比、质量分数）",
+    "化合价与化学式",
+    "有关化学式的计算（元素质量比、质量分数）",
     "化学式书写与化学方程式的书写原则（客观事实、质量守恒）",
     "质量守恒定律（宏观：元素种类、质量不变；微观：原子种类、数目、质量不变）",
-
     # ==========================================
     # 二、身边的化学物质（空气、水、碳、金属）
     # ==========================================
-    "空气的组成", "空气中氧气含量的测定（红磷燃烧，误差分析）",
+    "空气的组成",
+    "空气中氧气含量的测定（红磷燃烧，误差分析）",
     "氧气的性质与制取（高锰酸钾、氯酸钾、过氧化氢）",
     "催化剂与催化作用（一变两不变：改变化学反应速率，质量和化学性质不变）",
-    "水的组成与净化", "电解水实验与水的组成（正氧负氢，氢二氧一）",
-    "过滤、蒸发与蒸馏", "过滤操作“一贴二低三靠”；蒸发时用玻璃棒搅拌防止液滴飞溅",
+    "水的组成与净化",
+    "电解水实验与水的组成（正氧负氢，氢二氧一）",
+    "过滤、蒸发与蒸馏",
+    "过滤操作“一贴二低三靠”；蒸发时用玻璃棒搅拌防止液滴飞溅",
     "碳的单质（金刚石、石墨与 C60 的物理性质差异源于碳原子排列方式不同）",
     "一氧化碳与二氧化碳（CO 还原性、毒性；CO₂ 不支持燃烧、使澄清石灰水变浑浊）",
     "二氧化碳的制取与性质实验（大理石/石灰石与稀盐酸，向上排空气法）",
     "燃烧的条件与灭火原理（破坏其一即可）",
     "化石燃料与新能源（氢能、太阳能等）",
-    "金属材料", "合金及其与纯金属的区别（硬度大、熔点低、抗腐蚀性强）",
+    "金属材料",
+    "合金及其与纯金属的区别（硬度大、熔点低、抗腐蚀性强）",
     "金属活动性顺序：钾钙钠镁铝锌铁锡铅（氢）铜汞银铂金",
     "金属与酸反应：氢前金属置换出酸中的氢，铁与酸反应生成浅绿色的亚铁盐（Fe²⁺）",
     "金属与盐溶液反应：前面的金属能把后面的金属从其盐溶液中置换出来（K、Ca、Na 除外）",
     "金属的锈蚀条件与防护（与氧气和水同时接触；防锈：涂油、刷漆、镀铬等）",
     "一氧化碳还原氧化铜（铁的冶炼：先通气后加热，先撤灯后停气，尾气处理）",
-
     # ==========================================
     # 三、溶液与溶解度（图表与计算核心）
     # ==========================================
@@ -477,20 +475,20 @@ CHEMISTRY_KNOWLEDGE_POINTS = [
     "溶解度及其四要素（一定温度、100g 溶剂、饱和状态、单位 g）",
     "溶解度曲线及其含义：交点表示该温度下两物质溶解度相等",
     "结晶方法：降温结晶（冷却热饱和溶液）适用于溶解度受温度影响大的物质（如 KNO₃）；蒸发结晶适用于受温度影响小的物质（如 NaCl）",
-    "溶质质量分数", "溶液的配制（计算、称量、量取、溶解）",
+    "溶质质量分数",
+    "溶液的配制（计算、称量、量取、溶解）",
     "溶液稀释前后溶质质量不变；溶质质量分数=溶质质量÷溶液质量×100%",
-
     # ==========================================
     # 四、酸、碱、盐（中考压轴重灾区）
     # ==========================================
     "常见的酸：稀盐酸与稀硫酸的化学性质（与指示剂、活泼金属、金属氧化物、碱、盐反应）",
     "常见的碱：氢氧化钠（烧碱、火碱、苛性钠）与氢氧化钙（熟石灰、消石灰）的化学性质",
     "中和反应：酸 + 碱 → 盐 + 水，本质是 H⁺ + OH⁻ → H₂O",
-    "溶液的酸碱度 pH", "酸碱指示剂与 pH 试纸的使用",
+    "溶液的酸碱度 pH",
+    "酸碱指示剂与 pH 试纸的使用",
     "盐的化学性质（与金属、酸、碱、盐反应）",
     "复分解反应发生的条件：生成物中有沉淀、气体或水（反应物需可溶，除酸与碳酸盐/碱反应外）",
     "化学肥料：氮肥（叶）、磷肥（根）、钾肥（茎/抗倒伏），铵态氮肥不能与碱性物质混用（会放出氨气降低肥效）",
-
     # ==========================================
     # 五、化学推断题“秒杀”突破口（高阶技巧）
     # ==========================================
@@ -499,7 +497,6 @@ CHEMISTRY_KNOWLEDGE_POINTS = [
     "推断题气体突破口：能使澄清石灰水变浑浊的是 CO₂；能使带火星木条复燃的是 O₂；有刺激性气味的是 NH₃ 或 SO₂；最轻的气体是 H₂",
     "推断题反应条件突破口：通电（电解水）；高温（CaCO₃分解、C/CO 还原金属氧化物）；催化剂（H₂O₂或 KClO₃制 O₂）",
     "推断题特殊现象突破口：产生大量白烟（红磷燃烧）；产生白雾（浓盐酸挥发）；蓝色沉淀（Cu(OH)₂）；红褐色沉淀（Fe(OH)₃）",
-
     # ==========================================
     # 六、离子共存与除杂提纯（必考易错点）
     # ==========================================
@@ -509,7 +506,6 @@ CHEMISTRY_KNOWLEDGE_POINTS = [
     "除杂四大原则：“不增”（不引入新杂质）、“不减”（不减少被提纯物质）、“易分”（生成沉淀/气体/水易分离）、“复原”（若被提纯物反应，需能转化回来）",
     "除杂经典方法 1（气体）：除 CO₂ 中的 CO 用灼热 CuO；除 CO 中的 CO₂ 用 NaOH 溶液；除水蒸气用浓硫酸或碱石灰",
     "除杂经典方法 2（固体/溶液）：除 NaCl 中的 Na₂CO₃ 加适量稀盐酸；除 Cu 中的 Fe 加足量稀盐酸或 CuSO₄ 溶液后过滤",
-
     # ==========================================
     # 七、化学计算与图表分析技巧
     # ==========================================
@@ -518,7 +514,6 @@ CHEMISTRY_KNOWLEDGE_POINTS = [
     "图表计算题找“拐点”：图像中折点或平台期起点，通常代表“恰好完全反应”，此时的数据是计算的关键",
     "差量法计算技巧：反应前后固体质量的减少量 = 生成气体的质量；溶液质量的增加量 = 加入固体质量 - 生成气体/沉淀质量",
     "关系式法：多步反应中，利用元素守恒找出已知物与目标物之间的直接比例关系，简化计算",
-
     # ==========================================
     # 八、实验操作与探究题避坑指南
     # ==========================================
@@ -530,7 +525,6 @@ CHEMISTRY_KNOWLEDGE_POINTS = [
     "量筒读数避坑：“俯视读数偏大，实际体积偏小；仰视读数偏小，实际体积偏大”（俯大仰小）",
     "pH 试纸使用避坑：不能用水润湿！润湿相当于稀释溶液，会导致酸性溶液 pH 偏大，碱性溶液 pH 偏小，中性不变",
     "配制溶液误差分析：量取水时仰视（水多），或烧杯内有水，会导致溶质质量分数偏小；称量时物码放反且用了游码，会导致溶质质量分数偏小",
-
     # ==========================================
     # 九、化学与社会、生活、环境
     # ==========================================
@@ -538,30 +532,72 @@ CHEMISTRY_KNOWLEDGE_POINTS = [
     "化学与人体健康：六大营养素（糖类、油脂、蛋白质、维生素、水、无机盐）",
     "化学元素与健康：缺钙（骨质疏松/佝偻病）、缺铁（贫血）、缺锌（发育不良）、缺碘（甲状腺肿大）、缺氟（龋齿）",
     "有机合成材料：塑料（热塑性与热固性）、合成纤维（耐磨但吸水性差）、合成橡胶",
-    "天然有机高分子材料：棉花、羊毛（灼烧有烧焦羽毛味）、天然橡胶"
+    "天然有机高分子材料：棉花、羊毛（灼烧有烧焦羽毛味）、天然橡胶",
 ]
 
 ENGLISH_KNOWLEDGE_POINTS = [
-    "一般现在时", "一般过去时", "一般将来时", "现在进行时",
-    "过去进行时", "现在完成时", "过去完成时", "被动语态",
-    "情态动词", "定语从句", "宾语从句", "状语从句",
-    "条件状语从句", "虚拟语气", "非谓语动词", "主谓一致",
-    "冠词用法", "介词搭配", "形容词与副词比较级", "不定代词",
-    "阅读理解 - 主旨大意", "阅读理解 - 细节理解", "阅读理解 - 推理判断",
-    "完形填空 - 上下文逻辑", "完形填空 - 词义辨析",
-    "书面表达 - 书信格式", "书面表达 - 议论文结构",
-    "单词拼写", "短语搭配", "同义词辨析", "反义词"
+    "一般现在时",
+    "一般过去时",
+    "一般将来时",
+    "现在进行时",
+    "过去进行时",
+    "现在完成时",
+    "过去完成时",
+    "被动语态",
+    "情态动词",
+    "定语从句",
+    "宾语从句",
+    "状语从句",
+    "条件状语从句",
+    "虚拟语气",
+    "非谓语动词",
+    "主谓一致",
+    "冠词用法",
+    "介词搭配",
+    "形容词与副词比较级",
+    "不定代词",
+    "阅读理解 - 主旨大意",
+    "阅读理解 - 细节理解",
+    "阅读理解 - 推理判断",
+    "完形填空 - 上下文逻辑",
+    "完形填空 - 词义辨析",
+    "书面表达 - 书信格式",
+    "书面表达 - 议论文结构",
+    "单词拼写",
+    "短语搭配",
+    "同义词辨析",
+    "反义词",
 ]
 
 CHINESE_KNOWLEDGE_POINTS = [
-    "字音辨析", "字形辨析", "词语运用", "成语运用",
-    "病句辨析", "标点符号", "修辞手法", "仿写与句式变换",
-    "古诗文默写", "古诗词鉴赏 - 意象", "古诗词鉴赏 - 情感", "古诗词鉴赏 - 手法",
-    "文言文实词", "文言文虚词", "文言文翻译", "文言文断句",
-    "现代文阅读 - 记叙文", "现代文阅读 - 说明文", "现代文阅读 - 议论文",
-    "名著阅读", "综合性学习", "口语交际",
-    "作文 - 审题立意", "作文 - 结构布局", "作文 - 素材运用", "作文 - 语言表达",
-    "文学常识", "传统文化"
+    "字音辨析",
+    "字形辨析",
+    "词语运用",
+    "成语运用",
+    "病句辨析",
+    "标点符号",
+    "修辞手法",
+    "仿写与句式变换",
+    "古诗文默写",
+    "古诗词鉴赏 - 意象",
+    "古诗词鉴赏 - 情感",
+    "古诗词鉴赏 - 手法",
+    "文言文实词",
+    "文言文虚词",
+    "文言文翻译",
+    "文言文断句",
+    "现代文阅读 - 记叙文",
+    "现代文阅读 - 说明文",
+    "现代文阅读 - 议论文",
+    "名著阅读",
+    "综合性学习",
+    "口语交际",
+    "作文 - 审题立意",
+    "作文 - 结构布局",
+    "作文 - 素材运用",
+    "作文 - 语言表达",
+    "文学常识",
+    "传统文化",
 ]
 
 # ============== 学科配置 ==============
@@ -599,7 +635,7 @@ def _estimate_tokens(text: str) -> int:
     """粗略估算文本 token 数，用于 prompt 长度预算控制。"""
     if not text:
         return 0
-    zh = len(re.findall(r'[\u4e00-\u9fff]', text))
+    zh = len(re.findall(r"[\u4e00-\u9fff]", text))
     other = len(text) - zh
     return int(zh / 1.5 + other / 4) + 1
 
@@ -608,38 +644,43 @@ MAX_KNOWLEDGE_POINT_TOKENS = 4608
 
 
 def _normalize_text(text: str) -> str:
-    return re.sub(r'\s+', '', text or '').lower()
+    return re.sub(r"\s+", "", text or "").lower()
 
 
 def _format_knowledge_points_for_prompt(knowledge_points: list[str]) -> str:
     """将知识点列表裁剪后拼接进 prompt，避免超出上下文预算。"""
     if not knowledge_points:
-        return ''
+        return ""
 
     selected_points: list[str] = []
     used_tokens = 0
 
     for point in knowledge_points:
-        candidate = f'- {point}'
+        candidate = f"- {point}"
         candidate_tokens = _estimate_tokens(candidate)
-        if selected_points and used_tokens + candidate_tokens > MAX_KNOWLEDGE_POINT_TOKENS:
+        if (
+            selected_points
+            and used_tokens + candidate_tokens > MAX_KNOWLEDGE_POINT_TOKENS
+        ):
             break
         selected_points.append(candidate)
         used_tokens += candidate_tokens
 
     truncated = len(selected_points) < len(knowledge_points)
     prompt_lines = [
-        '【候选核心考点】',
-        '请优先从以下候选考点中选择 1-4 个最匹配的项；只有当候选列表里确实没有合适项时，才允许自行推理并输出新的合理考点。',
+        "【候选核心考点】",
+        "请优先从以下候选考点中选择 1-4 个最匹配的项；只有当候选列表里确实没有合适项时，才允许自行推理并输出新的合理考点。",
         *selected_points,
     ]
     if truncated:
-        prompt_lines.append('（候选考点过多，以上为按顺序截断后的可选列表）')
+        prompt_lines.append("（候选考点过多，以上为按顺序截断后的可选列表）")
 
-    return '\n'.join(prompt_lines)
+    return "\n".join(prompt_lines)
 
 
-def _map_tags_to_knowledge_points(tags: list[str], knowledge_points: list[str]) -> list[str]:
+def _map_tags_to_knowledge_points(
+    tags: list[str], knowledge_points: list[str]
+) -> list[str]:
     """将模型自由生成的标签映射回本地全量知识点库。"""
     if not tags or not knowledge_points:
         return tags
@@ -656,7 +697,7 @@ def _map_tags_to_knowledge_points(tags: list[str], knowledge_points: list[str]) 
 
         best_score = -1
         best_point = tag.strip()
-        tag_chars = set(re.findall(r'[\u4e00-\u9fffA-Za-z0-9]', normalized_tag))
+        tag_chars = set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", normalized_tag))
 
         for normalized_point, point in normalized_points:
             if not normalized_point:
@@ -672,13 +713,13 @@ def _map_tags_to_knowledge_points(tags: list[str], knowledge_points: list[str]) 
             if normalized_point in normalized_tag:
                 score += 900 + len(normalized_point)
 
-            point_chars = set(re.findall(r'[\u4e00-\u9fffA-Za-z0-9]', normalized_point))
+            point_chars = set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", normalized_point))
             shared_chars = len(tag_chars & point_chars)
             score += shared_chars * 10
 
             shared_bigrams = 0
             for idx in range(len(normalized_tag) - 1):
-                bigram = normalized_tag[idx:idx + 2]
+                bigram = normalized_tag[idx : idx + 2]
                 if bigram and bigram in normalized_point:
                     shared_bigrams += 1
             score += shared_bigrams * 25
@@ -693,44 +734,81 @@ def _map_tags_to_knowledge_points(tags: list[str], knowledge_points: list[str]) 
     return mapped or tags
 
 
-def build_analysis_prompt(subject: str = "", content: str = "") -> str:
-    """根据学科和题目内容构建分析 prompt"""
+def build_analysis_prompt(
+    subject: str = "",
+    content: str = "",
+    user_prompt: str = "",
+    previous_summary: str = "",
+) -> str:
+    """根据学科、题目内容、用户补充提示和上一次 AI 思路构建分析 prompt
+
+    Args:
+        subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
+        content: 题目内容文本
+        user_prompt: 用户自定义的解题方向/知识范围约束（可选），
+            例如"我还没学动能定理，请用受力分析和牛顿第二定律讲解"
+        previous_summary: 上一次 AI 生成的解题思路（可选），用于重新分析时
+            在既有思路基础上修正、深化，而不是完全重写
+    """
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
     role = cfg["role"]
     knowledge_points = cfg["knowledge_points"]
     knowledge_points_section = _format_knowledge_points_for_prompt(knowledge_points)
 
-    if knowledge_points:
-        kp_section = (
-            '3. 结合上方【候选核心考点】输出 1-4 个最匹配的核心考点，按重要程度排序。优先直接选用候选列表中的原始表述；只有候选列表里确实没有合适项时，才自行推理出新的合理考点。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。'
-        )
-    else:
-        kp_section = (
-            '3. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。'
+    # 上一次 AI 解题思路：供重新分析时参考与改进（可选）
+    previous_summary_section = ""
+    if previous_summary.strip():
+        previous_summary_section = (
+            "【上一次 AI 解题思路】\n"
+            f"{previous_summary.strip()}\n"
+            "说明：这是此前 AI 生成的分析结果。重新分析时应以此为基础："
+            "保留其中正确的思路与方法，在此基础上修正错误、补充细节，"
+            "并按下方【用户补充要求】（如有）调整解题方向与知识范围，"
+            "不要无视既有思路凭空重写，也不要简单照抄。\n\n"
         )
 
-    return ''.join([
-        f'你是一位{role}。请根据下方提供的【题目内容】，先做严谨审题，再识别题目涉及的核心考点。\n',
-        '\n',
-        '【题目内容】\n',
-        f'{content}\n',
-        '\n',
-        knowledge_points_section + '\n\n' if knowledge_points_section else '',
-        '【步骤】\n',
-        '1. 先以【题目文本】为最高优先级审题，逐句识别题目的实验/推理顺序、每一步的初始状态、过程变化和最终比较对象。若【已知条件与约束】中的概括与【题目文本】冲突，必须以【题目文本】为准，不得沿用错误概括。\n',
-        '2. 对连续过程题、多步实验题、先后变化题，必须特别检查后一步是否建立在前一步结果之上。不要把“同一对象的连续变化”误判为“多个彼此独立且初始状态相同的过程”，也不要默认系统会在步骤之间自动复原。\n',
-        kp_section + '\n',
-        '4. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n',
-        '\n',
-        '【输出格式】\n',
-        '只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹。必须且只能包含以下 4 个字段，缺一不可：\n',
-        '1. content：字符串。因为调用方已提供【题目内容】，此处直接写"（同上方题目内容）"即可，禁止复制全文。\n',
-        '2. summary：字符串，必填，非空。用 100-500 字讲解这道题的解题思路：讲清楚关键的解题步骤、用了什么方法或切入点、较为详细的推导过程，最终得到什么结论。要具体、针对本题，不要写空话套话。\n',
-        '3. tags：数组，1-4 个最匹配的核心考点。\n',
-        '4. difficulty：整数，1-5。\n',
-        '示例：\n',
-        '{"content": "（同上方题目内容）", "summary": "先利用正方形对角线互相垂直平分且相等的性质，得到 AF 与 FG 所在的直角三角形；再通过证明三角形全等或相似，求出 AF/FG 的比值。", "tags": ["正方形的性质", "相似三角形"], "difficulty": 3}',
-    ])
+    # 用户补充要求：约束 AI 的解题方向与知识范围（可选）
+    user_prompt_section = ""
+    if user_prompt.strip():
+        user_prompt_section = (
+            "【用户补充要求】\n"
+            f"{user_prompt.strip()}\n"
+            "说明：以上是用户根据自己的知识范围提出的解题方向与约束。你必须优先遵守："
+            "若用户要求用特定方法、特定知识点范围内解答，解题思路必须在该范围内展开，"
+            "不得使用用户明确表示尚未掌握的知识或方法；若用户表达了理解困难点，请针对性重点讲解。\n\n"
+        )
+
+    if knowledge_points:
+        kp_section = "3. 结合上方【候选核心考点】输出 1-4 个最匹配的核心考点，按重要程度排序。优先直接选用候选列表中的原始表述；只有候选列表里确实没有合适项时，才自行推理出新的合理考点。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。"
+    else:
+        kp_section = "3. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。"
+
+    return "".join(
+        [
+            f"你是一位{role}。请根据下方提供的【题目内容】，先做严谨审题，再识别题目涉及的核心考点。\n",
+            "\n",
+            "【题目内容】\n",
+            f"{content}\n",
+            "\n",
+            previous_summary_section,
+            user_prompt_section,
+            knowledge_points_section + "\n\n" if knowledge_points_section else "",
+            "【步骤】\n",
+            "1. 先以【题目文本】为最高优先级审题，逐句识别题目的实验/推理顺序、每一步的初始状态、过程变化和最终比较对象。若【已知条件与约束】中的概括与【题目文本】冲突，必须以【题目文本】为准，不得沿用错误概括。\n",
+            "2. 对连续过程题、多步实验题、先后变化题，必须特别检查后一步是否建立在前一步结果之上。不要把“同一对象的连续变化”误判为“多个彼此独立且初始状态相同的过程”，也不要默认系统会在步骤之间自动复原。\n",
+            kp_section + "\n",
+            "4. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n",
+            "\n",
+            "【输出格式】\n",
+            "只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹。必须且只能包含以下 4 个字段，缺一不可：\n",
+            '1. content：字符串。因为调用方已提供【题目内容】，此处直接写"（同上方题目内容）"即可，禁止复制全文。\n',
+            "2. summary：字符串，必填，非空。用 100-600 字讲解这道题的解题思路：讲清楚关键的解题步骤、用了什么方法或切入点、较为详细的推导过程，最终得到什么结论。要具体、针对本题，不要写空话套话。\n",
+            "3. tags：数组，1-4 个最匹配的核心考点。\n",
+            "4. difficulty：整数，1-5。\n",
+            "示例：\n",
+            '{"content": "（同上方题目内容）", "summary": "先利用正方形对角线互相垂直平分且相等的性质，得到 AF 与 FG 所在的直角三角形；再通过证明三角形全等或相似，求出 AF/FG 的比值。", "tags": ["正方形的性质", "相似三角形"], "difficulty": 3}',
+        ]
+    )
 
 
 # ============== 题目内容提取 Prompt ==============
@@ -794,6 +872,7 @@ ANALYSIS_PROMPT = build_analysis_prompt()
 # 所有 LLM 配置（URL / 模型名 / API Key）统一从 .env 读取，防止泄露。
 # 题目提取（视觉模型）与解题分析（文本模型）使用两套独立配置。
 
+
 @dataclass
 class AiConfig:
     api_url: str = ""
@@ -803,51 +882,58 @@ class AiConfig:
     max_tokens: int = 4096
 
     @classmethod
-    def for_image_analysis(cls) -> 'AiConfig':
+    def for_image_analysis(cls) -> "AiConfig":
         """读取图片题目提取专用配置（视觉模型）"""
         return cls(
-            api_url=os.getenv('IMAGE_ANALYSIS_AI_API_URL', ''),
-            model=os.getenv('IMAGE_ANALYSIS_AI_MODEL', ''),
-            api_key=os.getenv('IMAGE_ANALYSIS_API_KEY', ''),
-            timeout=float(os.getenv('AI_TIMEOUT', '120')),
-            max_tokens=int(os.getenv('AI_MAX_TOKENS', '4096')),
+            api_url=os.getenv("IMAGE_ANALYSIS_AI_API_URL", ""),
+            model=os.getenv("IMAGE_ANALYSIS_AI_MODEL", ""),
+            api_key=os.getenv("IMAGE_ANALYSIS_API_KEY", ""),
+            timeout=float(os.getenv("AI_TIMEOUT", "120")),
+            max_tokens=int(os.getenv("AI_MAX_TOKENS", "4096")),
         )
 
     @classmethod
-    def for_problem_analysis(cls) -> 'AiConfig':
+    def for_problem_analysis(cls) -> "AiConfig":
         """读取解题分析专用配置（文本模型）"""
         return cls(
-            api_url=os.getenv('PROBLEM_AI_API_URL', ''),
-            model=os.getenv('PROBLEM_API_MODEL', ''),
-            api_key=os.getenv('PROBLEM_API_KEY', ''),
-            timeout=float(os.getenv('AI_TIMEOUT', '120')),
-            max_tokens=int(os.getenv('AI_MAX_TOKENS', '4096')),
+            api_url=os.getenv("PROBLEM_AI_API_URL", ""),
+            model=os.getenv("PROBLEM_API_MODEL", ""),
+            api_key=os.getenv("PROBLEM_API_KEY", ""),
+            timeout=float(os.getenv("AI_TIMEOUT", "120")),
+            max_tokens=int(os.getenv("AI_MAX_TOKENS", "4096")),
         )
 
 
 # ============== 端点检测 ==============
 
+
 def is_anthropic_endpoint(api_url: str) -> bool:
-    return bool(re.search(r'/v1/messages(?:$|\?)', api_url))
+    return bool(re.search(r"/v1/messages(?:$|\?)", api_url))
 
 
 def is_ollama_chat_endpoint(api_url: str) -> bool:
-    return bool(re.search(r'/api/chat(?:$|\?)', api_url))
+    return bool(re.search(r"/api/chat(?:$|\?)", api_url))
 
 
 def is_deepseek_endpoint(api_url: str) -> bool:
-    return 'deepseek.com' in api_url.lower()
+    return "deepseek.com" in api_url.lower()
 
 
 def is_probably_ollama_base_url(api_url: str) -> bool:
-    return bool(re.match(r'^https?://(localhost|127\.0\.0\.1)(:\d+)?/?$', api_url.strip()))
+    return bool(
+        re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?/?$", api_url.strip())
+    )
 
 
 def normalize_api_url(api_url: str) -> str:
     trimmed = api_url.strip()
     if not trimmed:
         return trimmed
-    if is_anthropic_endpoint(trimmed) or '/v1/chat/completions' in trimmed or is_ollama_chat_endpoint(trimmed):
+    if (
+        is_anthropic_endpoint(trimmed)
+        or "/v1/chat/completions" in trimmed
+        or is_ollama_chat_endpoint(trimmed)
+    ):
         return trimmed
     if is_probably_ollama_base_url(trimmed):
         return f"{trimmed.rstrip('/')}/api/chat"
@@ -860,88 +946,121 @@ def should_require_api_key(api_url: str) -> bool:
 
 # ============== 请求构建 ==============
 
-def build_analyze_request(config: AiConfig, api_url: str, image_data_uri: str, image_base64: str, prompt: str = "") -> dict:
+
+def build_analyze_request(
+    config: AiConfig,
+    api_url: str,
+    image_data_uri: str,
+    image_base64: str,
+    prompt: str = "",
+) -> dict:
     """构建 AI 分析请求，返回 {headers, body}"""
     if not prompt:
         prompt = build_analysis_prompt()
-    #输出 prompt
-    logger.info(f'[LLM] 使用 Prompt: {prompt}')
+    # 输出 prompt
+    logger.info(f"[LLM] 使用 Prompt: {prompt}")
 
     if is_anthropic_endpoint(api_url):
         content_blocks: list[dict[str, Any]] = []
         if image_base64:
-            content_blocks.append({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': image_base64.split(',')[1] if ',' in image_base64 else image_base64}})
-        content_blocks.append({'type': 'text', 'text': prompt})
+            content_blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": (
+                            image_base64.split(",")[1]
+                            if "," in image_base64
+                            else image_base64
+                        ),
+                    },
+                }
+            )
+        content_blocks.append({"type": "text", "text": prompt})
         return {
-            'headers': {
-                'Content-Type': 'application/json',
-                'x-api-key': config.api_key,
-                'anthropic-version': '2023-06-01',
+            "headers": {
+                "Content-Type": "application/json",
+                "x-api-key": config.api_key,
+                "anthropic-version": "2023-06-01",
             },
-            'body': {
-                'model': config.model,
-                'max_tokens': config.max_tokens,
-                'messages': [{
-                    'role': 'user',
-                    'content': content_blocks,
-                }],
+            "body": {
+                "model": config.model,
+                "max_tokens": config.max_tokens,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": content_blocks,
+                    }
+                ],
             },
         }
     if is_ollama_chat_endpoint(api_url):
         return {
-            'headers': {'Content-Type': 'application/json'},
-            'body': {
-                'model': config.model,
-                'stream': False,
-                'think': False,
-                'options': {'num_predict': config.max_tokens},
-                'messages': [{
-                    'role': 'user',
-                    'content': prompt,
-                    'images': [image_base64] if image_base64 else [],
-                }],
+            "headers": {"Content-Type": "application/json"},
+            "body": {
+                "model": config.model,
+                "stream": False,
+                "think": False,
+                "options": {"num_predict": config.max_tokens},
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                        "images": [image_base64] if image_base64 else [],
+                    }
+                ],
             },
         }
     # OpenAI 兼容格式
-    headers = {'Content-Type': 'application/json'}
+    headers = {"Content-Type": "application/json"}
     if config.api_key:
-        headers['Authorization'] = f'Bearer {config.api_key}'
+        headers["Authorization"] = f"Bearer {config.api_key}"
 
-    content_blocks: list[dict[str, Any]] = [{'type': 'text', 'text': prompt}]
+    content_blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
     if is_deepseek_endpoint(api_url):
         # DeepSeek 当前兼容接口不接受 image_url，这里回退为纯文本消息以避免请求体校验失败。
         if image_data_uri:
-            content_blocks.append({'type': 'text', 'text': f'图片数据（data URI）：\n{image_data_uri}'})
+            content_blocks.append(
+                {"type": "text", "text": f"图片数据（data URI）：\n{image_data_uri}"}
+            )
         return {
-            'headers': headers,
-            'body': {
-                'model': config.model,
-                'max_tokens': config.max_tokens,
-                'messages': [{
-                    'role': 'user',
-                    'content': content_blocks,
-                }],
+            "headers": headers,
+            "body": {
+                "model": config.model,
+                "max_tokens": config.max_tokens,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": content_blocks,
+                    }
+                ],
             },
         }
 
     if image_data_uri:
-        content_blocks.append({'type': 'image_url', 'image_url': {'url': image_data_uri}})
+        content_blocks.append(
+            {"type": "image_url", "image_url": {"url": image_data_uri}}
+        )
 
     return {
-        'headers': headers,
-        'body': {
-            'model': config.model,
-            'max_tokens': config.max_tokens,
-            'messages': [{
-                'role': 'user',
-                'content': content_blocks,
-            }],
+        "headers": headers,
+        "body": {
+            "model": config.model,
+            "max_tokens": config.max_tokens,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": content_blocks,
+                }
+            ],
         },
     }
 
 
 # ============== 响应解析 ==============
+
 
 def _extract_json_from_tail(text: str) -> str:
     """从文本末尾提取最后一个完整合法的 JSON 对象/数组（平衡括号法）。
@@ -950,13 +1069,13 @@ def _extract_json_from_tail(text: str) -> str:
     能通过 json.loads 的完整 JSON，避免贪婪正则把推理文本也吞进来。
     """
     if not text:
-        return ''
+        return ""
     # 从后往前找最后一个闭合括号（} 或 ]），再往回匹配对应的起始括号
     for end in range(len(text) - 1, -1, -1):
         ch = text[end]
-        if ch not in ']}':
+        if ch not in "]}":
             continue
-        open_ch = '{' if ch == '}' else '['
+        open_ch = "{" if ch == "}" else "["
         depth = 1
         in_string = False
         escape = False
@@ -966,7 +1085,7 @@ def _extract_json_from_tail(text: str) -> str:
             if in_string:
                 if escape:
                     escape = False
-                elif c == '\\':
+                elif c == "\\":
                     escape = True
                 elif c == '"':
                     in_string = False
@@ -981,42 +1100,49 @@ def _extract_json_from_tail(text: str) -> str:
             elif c == ch:
                 depth += 1
         if start != -1:
-            candidate = text[start:end + 1]
+            candidate = text[start : end + 1]
             try:
                 json.loads(candidate)
                 return candidate
             except json.JSONDecodeError:
                 continue  # 该段不是合法 JSON，继续找更早的闭合括号
-    return ''
+    return ""
 
 
 def extract_text_from_response(data: dict, api_url: str) -> str:
     """从 AI 响应中提取文本内容"""
     if is_anthropic_endpoint(api_url):
-        text_block = next((block for block in (data.get('content') or []) if block.get('type') == 'text'), None)
-        return text_block['text'] if text_block else ''
+        text_block = next(
+            (
+                block
+                for block in (data.get("content") or [])
+                if block.get("type") == "text"
+            ),
+            None,
+        )
+        return text_block["text"] if text_block else ""
 
     if is_ollama_chat_endpoint(api_url):
-        message = data.get('message', {})
-        content = message.get('content', '')
-        thinking = message.get('thinking', '')
+        message = data.get("message", {})
+        content = message.get("content", "")
+        thinking = message.get("thinking", "")
         if isinstance(content, str) and content.strip():
             return content
         if isinstance(thinking, str) and thinking.strip():
-            logger.info('[LLM] Ollama content 为空，使用 thinking 字段')
+            logger.info("[LLM] Ollama content 为空，使用 thinking 字段")
             return thinking
-        return ''
+        return ""
 
-    message = data.get('choices', [{}])[0].get('message', {})
-    finish_reason = data.get('choices', [{}])[0].get('finish_reason', '')
-    content = message.get('content', '')
-    reasoning = message.get('reasoning', '')
-    reasoning_content = message.get('reasoning_content', '')
+    message = data.get("choices", [{}])[0].get("message", {})
+    finish_reason = data.get("choices", [{}])[0].get("finish_reason", "")
+    content = message.get("content", "")
+    reasoning = message.get("reasoning", "")
+    reasoning_content = message.get("reasoning_content", "")
 
     # 为了调试，打印输出 content 的内容
-    logger.debug(f'[LLM] content: {content}')
+    logger.debug(f"[LLM] content: {content}")
     if finish_reason:
-        logger.info(f'[LLM] finish_reason: {finish_reason}')
+        logger.info(f"[LLM] finish_reason: {finish_reason}")
 
     # DeepSeek（推理模型）：最终答案直接写在 content 字段，且本身就是完整 JSON。
     # 直接从 content 提取 JSON 返回，不走 reasoning 回退逻辑。
@@ -1026,50 +1152,61 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
         if isinstance(content, str) and content.strip():
             tail_json = _extract_json_from_tail(content)
             return tail_json if tail_json else content.strip()
-        if finish_reason == 'length':
-            logger.error('[LLM] DeepSeek 输出被 max_tokens 截断（finish_reason=length），content 为空，请调大 AI_MAX_TOKENS')
+        if finish_reason == "length":
+            logger.error(
+                "[LLM] DeepSeek 输出被 max_tokens 截断（finish_reason=length），content 为空，请调大 AI_MAX_TOKENS"
+            )
         else:
-            logger.error('[LLM] DeepSeek content 为空，未生成最终 JSON')
-        return ''
+            logger.error("[LLM] DeepSeek content 为空，未生成最终 JSON")
+        return ""
 
     if isinstance(content, str) and content.strip():
         return content
 
     # 其他 OpenAI 兼容推理模型可能把最终答案放在 reasoning / reasoning_content，
     # 若 content 为空则回退到这两个字段。
-    for field_name, field_value in (('reasoning', reasoning), ('reasoning_content', reasoning_content)):
+    for field_name, field_value in (
+        ("reasoning", reasoning),
+        ("reasoning_content", reasoning_content),
+    ):
         if isinstance(field_value, str) and field_value.strip():
-            logger.info(f'[LLM] content 为空，尝试从 {field_name} 提取最终 JSON')
+            logger.info(f"[LLM] content 为空，尝试从 {field_name} 提取最终 JSON")
             tail_json = _extract_json_from_tail(field_value)
             if tail_json:
                 return tail_json
-            if finish_reason == 'length':
-                logger.error('[LLM] 输出被 max_tokens 截断（finish_reason=length），未生成完整 JSON，请调大 AI_MAX_TOKENS')
+            if finish_reason == "length":
+                logger.error(
+                    "[LLM] 输出被 max_tokens 截断（finish_reason=length），未生成完整 JSON，请调大 AI_MAX_TOKENS"
+                )
             return field_value
     if isinstance(content, list):
-        return ''.join(item.get('text', '') for item in content if item.get('type') == 'text')
-    return ''
+        return "".join(
+            item.get("text", "") for item in content if item.get("type") == "text"
+        )
+    return ""
 
 
 def format_ai_error(detail: str) -> str:
-    if 'unknown variant `image_url`' in detail or 'expected `text`' in detail.lower():
-        return '当前 AI 服务拒绝了图片消息格式（image_url）。该服务的兼容接口没有接受本应用发送的图片输入格式。'
-    return f'AI API error: {detail}'
+    if "unknown variant `image_url`" in detail or "expected `text`" in detail.lower():
+        return "当前 AI 服务拒绝了图片消息格式（image_url）。该服务的兼容接口没有接受本应用发送的图片输入格式。"
+    return f"AI API error: {detail}"
 
 
 def parse_analysis_result(raw_text: str) -> dict:
     """解析 AI 返回的 JSON 文本，提取 content/tags"""
     cleaned = raw_text.strip()
-    cleaned = re.sub(r'^```json\s*', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'^```\s*', '', cleaned)
-    cleaned = re.sub(r'```\s*$', '', cleaned)
+    cleaned = re.sub(r"^```json\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^```\s*", "", cleaned)
+    cleaned = re.sub(r"```\s*$", "", cleaned)
     cleaned = cleaned.strip()
 
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
         decoder = json.JSONDecoder()
-        start_positions = [idx for idx in (cleaned.find('['), cleaned.find('{')) if idx != -1]
+        start_positions = [
+            idx for idx in (cleaned.find("["), cleaned.find("{")) if idx != -1
+        ]
         parsed = None
         for start in sorted(start_positions):
             try:
@@ -1079,24 +1216,28 @@ def parse_analysis_result(raw_text: str) -> dict:
                 continue
         if parsed is None:
             raise
-    content = ''
-    summary = ''
+    content = ""
+    summary = ""
     difficulty = 3
     tags = []
     if isinstance(parsed, list):
         # 模型可能只返回了 tags 数组（不完整输出），尝试从数组中提取
         tags = [t for t in parsed if isinstance(t, str)]
     elif isinstance(parsed, dict):
-        tags = parsed.get('tags') if isinstance(parsed.get('tags'), list) else []
-        content = parsed.get('content', '') if isinstance(parsed.get('content'), str) else ''
-        summary = parsed.get('summary', '') if isinstance(parsed.get('summary'), str) else ''
-        raw_difficulty = parsed.get('difficulty')
+        tags = parsed.get("tags") if isinstance(parsed.get("tags"), list) else []
+        content = (
+            parsed.get("content", "") if isinstance(parsed.get("content"), str) else ""
+        )
+        summary = (
+            parsed.get("summary", "") if isinstance(parsed.get("summary"), str) else ""
+        )
+        raw_difficulty = parsed.get("difficulty")
         if isinstance(raw_difficulty, bool):
             difficulty = 3
         elif isinstance(raw_difficulty, (int, float)):
             difficulty = int(raw_difficulty)
         elif isinstance(raw_difficulty, str):
-            m = re.search(r'(\d+)', raw_difficulty)
+            m = re.search(r"(\d+)", raw_difficulty)
             if m:
                 difficulty = int(m.group(1))
         if difficulty < 1:
@@ -1108,29 +1249,36 @@ def parse_analysis_result(raw_text: str) -> dict:
     if not summary.strip() and cleaned:
         m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned, re.DOTALL)
         if m:
-            extracted = m.group(1).replace('\\"', '"').replace('\\n', '\n').strip()
+            extracted = m.group(1).replace('\\"', '"').replace("\\n", "\n").strip()
             if extracted:
                 summary = extracted
 
     if not summary.strip() and not tags:
-        logger.warning(f'[LLM] 解析结果为空（summary/tags 均缺失），原始文本可能是被截断的推理内容：{cleaned[:200]}')
+        logger.warning(
+            f"[LLM] 解析结果为空（summary/tags 均缺失），原始文本可能是被截断的推理内容：{cleaned[:200]}"
+        )
 
-    return {'content': content.strip(), 'summary': summary.strip(), 'tags': tags, 'difficulty': difficulty}
+    return {
+        "content": content.strip(),
+        "summary": summary.strip(),
+        "tags": tags,
+        "difficulty": difficulty,
+    }
 
 
 def parse_extraction_result(raw_text: str) -> str:
     """解析题目内容提取结果，返回 content 文本"""
     cleaned = raw_text.strip()
-    cleaned = re.sub(r'^```\s*', '', cleaned)
-    cleaned = re.sub(r'```\s*$', '', cleaned)
+    cleaned = re.sub(r"^```\s*", "", cleaned)
+    cleaned = re.sub(r"```\s*$", "", cleaned)
     cleaned = cleaned.strip()
     if not cleaned:
-        return ''
+        return ""
     # 兼容部分模型用 JSON 包装返回的情况
     try:
         parsed = json.loads(cleaned)
         if isinstance(parsed, dict):
-            for key in ('content', 'prompt', 'text'):
+            for key in ("content", "prompt", "text"):
                 value = parsed.get(key)
                 if isinstance(value, str) and value.strip():
                     return value.strip()
@@ -1141,52 +1289,73 @@ def parse_extraction_result(raw_text: str) -> str:
 
 # ============== 核心分析函数 ==============
 
+
 def _encode_image(image_path: str) -> tuple[str, str]:
     """读取图片并返回 (image_base64, data_uri)"""
     if not os.path.isfile(image_path):
-        raise FileNotFoundError(f'图片文件不存在：{image_path}')
+        raise FileNotFoundError(f"图片文件不存在：{image_path}")
 
-    with open(image_path, 'rb') as f:
+    with open(image_path, "rb") as f:
         image_data = f.read()
-    image_base64 = base64.b64encode(image_data).decode('utf-8')
+    image_base64 = base64.b64encode(image_data).decode("utf-8")
 
     ext = os.path.splitext(image_path)[1].lower()
-    mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
-    mime_type = mime_map.get(ext, 'image/jpeg')
-    data_uri = f'data:{mime_type};base64,{image_base64}'
+    mime_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }
+    mime_type = mime_map.get(ext, "image/jpeg")
+    data_uri = f"data:{mime_type};base64,{image_base64}"
 
-    logger.info(f'[LLM] 图片已编码，大小：{len(image_data)} bytes, MIME: {mime_type}')
+    logger.info(f"[LLM] 图片已编码，大小：{len(image_data)} bytes, MIME: {mime_type}")
     return image_base64, data_uri
 
 
-async def _call_ai(config: AiConfig, api_url: str, data_uri: str, image_base64: str, prompt: str) -> str:
+async def _call_ai(
+    config: AiConfig, api_url: str, data_uri: str, image_base64: str, prompt: str
+) -> str:
     """构建请求并调用 AI，返回响应文本"""
     request = build_analyze_request(config, api_url, data_uri, image_base64, prompt)
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(config.timeout), trust_env=False) as client:
-        resp = await client.post(api_url, headers=request['headers'], json=request['body'])
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(config.timeout), trust_env=False
+    ) as client:
+        resp = await client.post(
+            api_url, headers=request["headers"], json=request["body"]
+        )
 
-    logger.info(f'[LLM] AI 响应：status={resp.status_code}, len={len(resp.text)}')
+    logger.info(f"[LLM] AI 响应：status={resp.status_code}, len={len(resp.text)}")
 
     if not resp.is_success:
-        err_detail = f'HTTP {resp.status_code} {resp.reason_phrase}'
+        err_detail = f"HTTP {resp.status_code} {resp.reason_phrase}"
         try:
             err_data = resp.json()
-            err_detail = err_data.get('error', {}).get('message') or err_data.get('message') or err_data.get('detail') or err_detail
+            err_detail = (
+                err_data.get("error", {}).get("message")
+                or err_data.get("message")
+                or err_data.get("detail")
+                or err_detail
+            )
         except Exception:
-            text_snippet = re.sub(r'<[^>]+>', '', resp.text).strip()[:200]
+            text_snippet = re.sub(r"<[^>]+>", "", resp.text).strip()[:200]
             if text_snippet:
-                err_detail = f'HTTP {resp.status_code}: {text_snippet}'
-        logger.error(f'[LLM] AI 调用失败：{err_detail}')
+                err_detail = f"HTTP {resp.status_code}: {text_snippet}"
+        logger.error(f"[LLM] AI 调用失败：{err_detail}")
         raise RuntimeError(format_ai_error(err_detail))
 
     data = resp.json()
     response_text = extract_text_from_response(data, api_url)
     if not response_text:
-        logger.error(f'[LLM] AI 返回无文本内容：{json.dumps(data, ensure_ascii=False)[:500]}')
-        raise RuntimeError('AI 未返回文本内容，请检查模型名称')
+        logger.error(
+            f"[LLM] AI 返回无文本内容：{json.dumps(data, ensure_ascii=False)[:500]}"
+        )
+        raise RuntimeError("AI 未返回文本内容，请检查模型名称")
 
-    logger.info(f'[LLM] AI 返回文本长度：{len(response_text)}')
+    logger.info(f"[LLM] AI 返回文本长度：{len(response_text)}")
     return response_text
 
 
@@ -1214,18 +1383,22 @@ async def extract_problem_content(
     if config is None:
         config = AiConfig.for_image_analysis()
 
-    logger.info(f'[LLM] 开始提取图片题目内容：{image_path}')
+    logger.info(f"[LLM] 开始提取图片题目内容：{image_path}")
 
     image_base64, data_uri = _encode_image(image_path)
 
     api_url = normalize_api_url(config.api_url)
     if not api_url or not config.model.strip():
-        raise ValueError('AI 配置不完整：请设置 API URL 和模型名')
+        raise ValueError("AI 配置不完整：请设置 API URL 和模型名")
     if should_require_api_key(api_url) and not config.api_key:
-        raise ValueError('该端点需要 API Key')
+        raise ValueError("该端点需要 API Key")
 
-    logger.info(f'[LLM] 调用 AI API（提取题目内容）: url={api_url}, model={config.model}')
-    response_text = await _call_ai(config, api_url, data_uri, image_base64, PROBLEM_EXTRACTION_PROMPT)
+    logger.info(
+        f"[LLM] 调用 AI API（提取题目内容）: url={api_url}, model={config.model}"
+    )
+    response_text = await _call_ai(
+        config, api_url, data_uri, image_base64, PROBLEM_EXTRACTION_PROMPT
+    )
     return parse_extraction_result(response_text)
 
 
@@ -1235,6 +1408,8 @@ async def analyze_image(
     problem_config: Optional[AiConfig] = None,
     subject: str = "",
     content: str | None = None,
+    user_prompt: str | None = None,
+    previous_summary: str | None = None,
 ) -> dict:
     """
     分析错题图片，返回 {content, summary, tags, difficulty}。
@@ -1249,6 +1424,8 @@ async def analyze_image(
         problem_config: 解题分析 AI 配置，若为 None 则从 .env 读取
         subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
         content: 已提取的题目内容，若提供则跳过 OCR 提取步骤
+        user_prompt: 用户自定义的解题方向/知识范围约束（可选），会附加到分析 prompt 中
+        previous_summary: 上一次 AI 生成的解题思路（可选），重新分析时在此基础上改进
 
     Returns:
         {'content': str, 'summary': str, 'tags': list[str], 'difficulty': int}
@@ -1263,44 +1440,58 @@ async def analyze_image(
     if problem_config is None:
         problem_config = AiConfig.for_problem_analysis()
 
-    logger.info(f'[LLM] 开始分析图片：{image_path}')
+    logger.info(f"[LLM] 开始分析图片：{image_path}")
 
     image_api_url = normalize_api_url(image_config.api_url)
     if not image_api_url or not image_config.model.strip():
-        raise ValueError('AI 配置不完整（图片提取）：请设置 API URL 和模型名')
+        raise ValueError("AI 配置不完整（图片提取）：请设置 API URL 和模型名")
     if should_require_api_key(image_api_url) and not image_config.api_key:
-        raise ValueError('该端点需要 API Key（图片提取）')
+        raise ValueError("该端点需要 API Key（图片提取）")
 
     problem_api_url = normalize_api_url(problem_config.api_url)
     if not problem_api_url or not problem_config.model.strip():
-        raise ValueError('AI 配置不完整（解题分析）：请设置 API URL 和模型名')
+        raise ValueError("AI 配置不完整（解题分析）：请设置 API URL 和模型名")
     if should_require_api_key(problem_api_url) and not problem_config.api_key:
-        raise ValueError('该端点需要 API Key（解题分析）')
+        raise ValueError("该端点需要 API Key（解题分析）")
 
     # 1. 获取题目内容：若调用方已提供则跳过 OCR 提取
     if content:
-        logger.info(f'[LLM] 使用调用方提供的题目内容（跳过 OCR）')
+        logger.info(f"[LLM] 使用调用方提供的题目内容（跳过 OCR）")
     else:
         content = await extract_problem_content(image_path, image_config)
-        logger.info(f'[LLM] 题目内容：{content if len(content) < 100 else content[:100] }')
+        logger.info(
+            f"[LLM] 题目内容：{content if len(content) < 100 else content[:100] }"
+        )
 
     # 2. 基于题目内容构建分析 prompt 并调用 AI（纯文本，使用解题分析配置）
-    logger.info(f'[LLM] 调用 AI API（解题分析）: url={problem_api_url}, model={problem_config.model}')
-    prompt = build_analysis_prompt(subject, content)
-    response_text = await _call_ai(problem_config, problem_api_url, '', '', prompt)
+    logger.info(
+        f"[LLM] 调用 AI API（解题分析）: url={problem_api_url}, model={problem_config.model}"
+    )
+    prompt = build_analysis_prompt(
+        subject, content, user_prompt or "", previous_summary or ""
+    )
+    if user_prompt:
+        logger.info(f"[LLM] 已附加用户补充要求：{user_prompt[:120]}")
+    if previous_summary:
+        logger.info(
+            f"[LLM] 已附带上一次 AI 解题思路（{len(previous_summary)} 字）作为参考"
+        )
+    response_text = await _call_ai(problem_config, problem_api_url, "", "", prompt)
 
     # 3. 解析 JSON 结果
     try:
         result = parse_analysis_result(response_text)
     except json.JSONDecodeError as e:
-        logger.error(f'[LLM] JSON 解析失败：{e}, raw={response_text[:300]}')
-        raise RuntimeError(f'AI 返回的不是有效 JSON: {e}')
+        logger.error(f"[LLM] JSON 解析失败：{e}, raw={response_text[:300]}")
+        raise RuntimeError(f"AI 返回的不是有效 JSON: {e}")
 
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
-    result['tags'] = _map_tags_to_knowledge_points(result.get('tags', []), cfg.get('knowledge_points', []))
+    result["tags"] = _map_tags_to_knowledge_points(
+        result.get("tags", []), cfg.get("knowledge_points", [])
+    )
 
     # 4. 提取的 content 作为最终 content 值
-    result['content'] = content
+    result["content"] = content
     # 日志记录 summary 信息
     logger.info(f'[LLM] 解题思路：{result["summary"]}')
     logger.info(f'[LLM] 解析成功：tags={result["tags"]}')
@@ -1326,9 +1517,9 @@ ENCOURAGEMENT_SINGLE_PROMPT = """你是一名学习督促助手。请为下面�
 def parse_encouragement_result(raw_text: str) -> list[dict]:
     """解析鼓励语 AI 响应，返回 [{file_path, message}, ...]"""
     cleaned = raw_text.strip()
-    cleaned = re.sub(r'^```json\s*', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'^```\s*', '', cleaned)
-    cleaned = re.sub(r'```\s*$', '', cleaned)
+    cleaned = re.sub(r"^```json\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^```\s*", "", cleaned)
+    cleaned = re.sub(r"```\s*$", "", cleaned)
     cleaned = cleaned.strip()
 
     if not cleaned:
@@ -1338,21 +1529,29 @@ def parse_encouragement_result(raw_text: str) -> list[dict]:
         if isinstance(value, list):
             return value
         if isinstance(value, dict):
-            if isinstance(value.get("file_path"), str) and isinstance(value.get("message"), str):
+            if isinstance(value.get("file_path"), str) and isinstance(
+                value.get("message"), str
+            ):
                 return [value]
             for key in ("reminders", "items", "results", "data"):
                 nested = value.get(key)
                 if isinstance(nested, list):
                     return nested
-            if value and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
-                return [{"file_path": key, "message": val} for key, val in value.items()]
+            if value and all(
+                isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+            ):
+                return [
+                    {"file_path": key, "message": val} for key, val in value.items()
+                ]
         return []
 
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
         decoder = json.JSONDecoder()
-        start_positions = [idx for idx in (cleaned.find('['), cleaned.find('{')) if idx != -1]
+        start_positions = [
+            idx for idx in (cleaned.find("["), cleaned.find("{")) if idx != -1
+        ]
         parsed = None
         for start in sorted(start_positions):
             try:
@@ -1365,7 +1564,9 @@ def parse_encouragement_result(raw_text: str) -> list[dict]:
             return []
     entries = normalize_entries(parsed)
     if not entries:
-        logger.warning(f"[Encourage] 期望 JSON 数组或兼容对象，实际得到 {type(parsed).__name__}，已忽略")
+        logger.warning(
+            f"[Encourage] 期望 JSON 数组或兼容对象，实际得到 {type(parsed).__name__}，已忽略"
+        )
         return []
     return entries
 
@@ -1381,7 +1582,7 @@ def load_json_relaxed(raw_text: str) -> dict:
         pass
 
     decoder = json.JSONDecoder()
-    for start in (cleaned.find('{'), cleaned.find('[')):
+    for start in (cleaned.find("{"), cleaned.find("[")):
         if start == -1:
             continue
         try:
@@ -1391,7 +1592,7 @@ def load_json_relaxed(raw_text: str) -> dict:
         if isinstance(parsed, dict):
             return parsed
 
-    raise json.JSONDecodeError('Expecting JSON object', cleaned, 0)
+    raise json.JSONDecodeError("Expecting JSON object", cleaned, 0)
 
 
 async def _generate_single_encouragement(
@@ -1408,34 +1609,38 @@ async def _generate_single_encouragement(
     items_text = f"- 题目：{title if title else '未命名'}\n  学科：{subject if subject else '未分类'}\n  已 {days} 天未练习"
     prompt = ENCOURAGEMENT_SINGLE_PROMPT + "\n\n" + items_text
 
-    headers = {'Content-Type': 'application/json'}
+    headers = {"Content-Type": "application/json"}
     if ai_config.api_key:
-        headers['Authorization'] = f'Bearer {ai_config.api_key}'
+        headers["Authorization"] = f"Bearer {ai_config.api_key}"
 
     body = {
-        'model': ai_config.model,
-        'max_tokens': ai_config.max_tokens,
-        'stream': False,
-        'messages': [
-            {'role': 'user', 'content': prompt}
-        ],
+        "model": ai_config.model,
+        "max_tokens": ai_config.max_tokens,
+        "stream": False,
+        "messages": [{"role": "user", "content": prompt}],
     }
 
     if is_ollama_chat_endpoint(api_url):
-        body['think'] = False
-        body['format'] = 'json'
-        body['options'] = {'num_predict': ai_config.max_tokens}
+        body["think"] = False
+        body["format"] = "json"
+        body["options"] = {"num_predict": ai_config.max_tokens}
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(ai_config.timeout), trust_env=False) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(ai_config.timeout), trust_env=False
+        ) as client:
             resp = await client.post(api_url, headers=headers, json=body)
 
         # 记录原始响应（只截取前 1000 字符避免日志爆炸）
         raw_preview = resp.text[:1000]
-        logger.info(f"[Encourage] 原始响应 (file_path={file_path}): status={resp.status_code}, raw={raw_preview}")
+        logger.info(
+            f"[Encourage] 原始响应 (file_path={file_path}): status={resp.status_code}, raw={raw_preview}"
+        )
 
         if not resp.is_success:
-            logger.error(f"[Encourage] AI 调用失败：HTTP {resp.status_code}, file_path={file_path}")
+            logger.error(
+                f"[Encourage] AI 调用失败：HTTP {resp.status_code}, file_path={file_path}"
+            )
             return ""
 
         response_data = load_json_relaxed(resp.text)
@@ -1446,9 +1651,9 @@ async def _generate_single_encouragement(
 
         # 解析单条 JSON：{"message": "..."}
         cleaned = response_text.strip()
-        cleaned = re.sub(r'^```json\s*', '', cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r'^```\s*', '', cleaned)
-        cleaned = re.sub(r'```\s*$', '', cleaned)
+        cleaned = re.sub(r"^```json\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^```\s*", "", cleaned)
+        cleaned = re.sub(r"```\s*$", "", cleaned)
         cleaned = cleaned.strip()
 
         if not cleaned:
@@ -1461,7 +1666,7 @@ async def _generate_single_encouragement(
         except json.JSONDecodeError:
             # 尝试从字符串中提取第一个 JSON 对象
             decoder = json.JSONDecoder()
-            start = cleaned.find('{')
+            start = cleaned.find("{")
             if start != -1:
                 try:
                     parsed, _ = decoder.raw_decode(cleaned[start:])
@@ -1475,16 +1680,22 @@ async def _generate_single_encouragement(
             if isinstance(msg, str) and msg.strip():
                 return msg.strip()
             # 兼容旧格式：直接返回无 message 键时整个文本当 message
-            logger.warning(f"[Encourage] JSON 中无有效 message 字段：{cleaned[:200]}, file_path={file_path}")
+            logger.warning(
+                f"[Encourage] JSON 中无有效 message 字段：{cleaned[:200]}, file_path={file_path}"
+            )
             return ""
 
         # 如果 AI 直接返回了纯文本（无 JSON），直接当 message 用
         text = cleaned.strip().strip('"\'"')
         if text and len(text) < 100:
-            logger.info(f"[Encourage] AI 返回纯文本，直接使用：{text}, file_path={file_path}")
+            logger.info(
+                f"[Encourage] AI 返回纯文本，直接使用：{text}, file_path={file_path}"
+            )
             return text
 
-        logger.warning(f"[Encourage] 无法解析 AI 响应：{cleaned[:200]}, file_path={file_path}")
+        logger.warning(
+            f"[Encourage] 无法解析 AI 响应：{cleaned[:200]}, file_path={file_path}"
+        )
         return ""
 
     except Exception as e:
@@ -1526,7 +1737,9 @@ async def generate_encouragements(items: list[dict]) -> dict:
             days = round((item.get("inactive_hours", 0) or 0) / 24, 1)
             fallback = f"这道题已经放了 {days} 天了，不打算看看它吗？"
             result[fp] = fallback
-            logger.warning(f"[Encourage] [{idx + 1}/{len(items)}] 生成失败，使用兜底文案，file_path={fp}")
+            logger.warning(
+                f"[Encourage] [{idx + 1}/{len(items)}] 生成失败，使用兜底文案，file_path={fp}"
+            )
 
     logger.info(f"[Encourage] 全部完成，成功生成 {len(result)}/{len(items)} 条鼓励语")
     return result

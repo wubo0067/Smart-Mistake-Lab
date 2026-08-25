@@ -105,25 +105,53 @@
 |------|----------|------|
 | Node.js | ≥ 18 | 前端构建和运行 |
 | npm | ≥ 9 | 前端包管理 |
-| Python | ≥ 3.10 | 后端服务 |
-| uv | 最新 | Python 包管理器（推荐） |
+| Python | ≥ 3.10 | 后端服务（由 uv 自动管理） |
+| uv | 最新 | Python 包管理器与虚拟环境管理（推荐） |
 | AI 服务 | — | OpenAI/Claude/Ollama 等支持图片输入的模型服务 |
 
-### 第 1 步：克隆项目并安装依赖
+### 安装 uv
+
+项目后端使用 [uv](https://docs.astral.sh/uv/) 管理 Python 虚拟环境与依赖。**未安装 uv 时，请先按操作系统安装**：
+
+#### Windows (PowerShell)
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+#### macOS / Linux
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+安装完成后**重新打开一个终端**，执行 `uv --version` 验证安装成功。
+
+> 其他安装方式（`pip install uv`、`pipx install uv`、`winget install astral-sh.uv`、`scoop install uv` 等）详见 [uv 官方安装文档](https://docs.astral.sh/uv/getting-started/installation/)。
+
+### 第 1 步：克隆项目并初始化依赖
 
 ```bash
 # 克隆项目
 git clone <repository-url>
 cd Smart-Mistake-Lab
 
-# 安装前端依赖
+# 初始化前端依赖（生成 node_modules/）
 npm install
 
-# 安装后端依赖
+# 初始化后端依赖：uv sync 会自动创建 server/.venv 虚拟环境，
+# 并按 server/pyproject.toml 安装全部 Python 依赖（fastapi / uvicorn / httpx / python-dotenv）
 cd server
 uv sync
 cd ..
 ```
+
+**依赖初始化说明**：
+
+- **前端**：`npm install` 依据根目录 `package.json` 安装 React / Vite 等前端依赖。
+- **后端**：`uv sync` 依据 `server/pyproject.toml` 自动创建 `server/.venv` 虚拟环境并安装依赖；首次运行会下载 Python 运行时与依赖包，请保持网络畅通。
+- 后续启动统一使用 `uv run python server.py`（一键脚本 `start.ps1` / `start.bat` / `start.sh` 内部也是调用 uv），**无需手动激活虚拟环境**。
+- 若依赖清单有更新（如拉取了新代码），重新执行 `uv sync` 即可同步安装。
 
 请确保在执行 `npm run dev` 时当前目录是 Smart-Mistake-Lab（包含 `package.json` 的目录），否则 npm 会启动失败。
 
@@ -146,7 +174,7 @@ PROBLEM_API_KEY=sk-your-problem-analysis-api-key
 > 📌 **重要**：
 > - **图片题目提取模型**（`IMAGE_ANALYSIS_*`）**必须支持图片输入**（如 GPT-4 Vision、Claude、LLaVA）。
 > - **解题分析模型**（`PROBLEM_*`）只需支持文本输入即可，可选用更便宜或更擅长结构化输出的模型。
-> - 不同 AI 服务的配置格式详见[「AI 配置」](#ai-配置)部分。
+> - 不同 AI 服务的配置格式详见[「AI 配置（.env）」](#ai-配置env)部分。
 
 ### 第 3 步：一键启动（推荐）
 
@@ -284,9 +312,9 @@ C:\Users\me\Pictures\错题\
 
 > 深层子目录（如 `数学/01-三角形/`）不会产生独立学科，其图片归到一级子目录对应的学科。
 
-### AI 配置
+### AI 配置（.env）
 
-AI 参数由后端服务统一管理，通过 `Smart-Mistake-Lab/` 目录下的 `.env` 文件配置。系统使用**两套独立配置**，分别用于不同的 AI 任务：
+AI 参数由后端服务统一管理，通过 `Smart-Mistake-Lab/` 根目录下的 `.env` 文件配置（后端启动时会自动加载，见 `server/server.py`）。系统使用**两套独立配置**，分别用于不同的 AI 任务：
 
 ```env
 # ---- 图片题目提取配置（视觉模型，必须支持图片输入）----
@@ -298,14 +326,85 @@ IMAGE_ANALYSIS_API_KEY=sk-your-image-analysis-api-key
 PROBLEM_AI_API_URL=https://your-text-model-host/v1/chat/completions
 PROBLEM_API_MODEL=your-text-model
 PROBLEM_API_KEY=sk-your-problem-analysis-api-key
+
+# ---- 通用配置（两套 AI 共用，可选）----
+# AI_TIMEOUT=120              # 单次 AI 请求超时（秒），默认 120
+# AI_MAX_TOKENS=4096          # 模型最大输出 token 数，默认 4096
 ```
 
 > 所有 LLM 配置（URL / 模型名 / API Key）仅存于 `.env`，不会暴露到浏览器端，也不会写入数据库。修改后需重启后端服务（重新运行启动脚本，或手动执行 `uv run python server.py`）。
+
+#### 配置项说明
+
+| 变量 | 必填 | 默认值 | 说明 |
+|------|:----:|:------:|------|
+| `IMAGE_ANALYSIS_AI_API_URL` | ✅ | — | 图片题目提取服务地址（视觉模型） |
+| `IMAGE_ANALYSIS_AI_MODEL` | ✅ | — | 图片题目提取使用的模型名 |
+| `IMAGE_ANALYSIS_API_KEY` | 视服务 | — | 图片题目提取 API Key（Ollama 可留空） |
+| `PROBLEM_AI_API_URL` | ✅ | — | 解题分析服务地址（文本模型） |
+| `PROBLEM_API_MODEL` | ✅ | — | 解题分析使用的模型名 |
+| `PROBLEM_API_KEY` | 视服务 | — | 解题分析 API Key（Ollama 可留空） |
+| `AI_TIMEOUT` | 否 | `120` | 单次 AI 请求超时（秒） |
+| `AI_MAX_TOKENS` | 否 | `4096` | 模型最大输出 token 数；若分析结果被截断（日志出现 `max_tokens` 截断提示），可调大此值 |
 
 职责说明：
 
 - **图片题目提取**（`IMAGE_ANALYSIS_*`）：从错题图片中提取完整题目内容，所用模型**必须支持视觉输入**。
 - **解题分析**（`PROBLEM_*`）：基于题目文本生成解题思路（summary）、知识点标签（tags）和难度（difficulty），以及**重点练鼓励语**，所用模型只需支持文本输入。
+
+#### 常见模型配置示例
+
+**OpenAI 兼容服务（GPT-4o / Qwen / GLM / 硅基流动 / vLLM 等）**：
+
+```env
+IMAGE_ANALYSIS_AI_API_URL=https://api.openai.com/v1/chat/completions
+IMAGE_ANALYSIS_AI_MODEL=gpt-4o
+IMAGE_ANALYSIS_API_KEY=sk-xxxxxxxx
+
+PROBLEM_AI_API_URL=https://api.openai.com/v1/chat/completions
+PROBLEM_API_MODEL=gpt-4o-mini
+PROBLEM_API_KEY=sk-xxxxxxxx
+```
+
+**DeepSeek（仅支持文本，只能用于解题分析，不能用于图片提取）**：
+
+```env
+PROBLEM_AI_API_URL=https://api.deepseek.com/v1/chat/completions
+PROBLEM_API_MODEL=deepseek-chat
+PROBLEM_API_KEY=sk-xxxxxxxx
+```
+
+**Anthropic Claude（视觉 + 文本）**：
+
+```env
+IMAGE_ANALYSIS_AI_API_URL=https://api.anthropic.com/v1/messages
+IMAGE_ANALYSIS_AI_MODEL=claude-sonnet-4-20250514
+IMAGE_ANALYSIS_API_KEY=sk-ant-xxxxxxxx
+
+PROBLEM_AI_API_URL=https://api.anthropic.com/v1/messages
+PROBLEM_API_MODEL=claude-sonnet-4-20250514
+PROBLEM_API_KEY=sk-ant-xxxxxxxx
+```
+
+**Ollama 本地部署（无需 API Key）**：
+
+```env
+IMAGE_ANALYSIS_AI_API_URL=http://localhost:11434
+IMAGE_ANALYSIS_AI_MODEL=qwen3.6-flash
+
+PROBLEM_AI_API_URL=http://localhost:11434
+PROBLEM_API_MODEL=deepseek-v4-flash
+
+# 请求超时（秒），默认 120。本地模型处理图片可能需要更长时间
+AI_TIMEOUT=600
+
+# 最大输出 token 数量。分析只输出一个 JSON（content 复制题目 + summary + tags），
+# 一般 1500 token 内足够；但 DeepSeek 等推理模型（deepseek-v4-flash）会把大部分
+# token 消耗在 reasoning_content 推理过程上，若 max_tokens 太小会在推理中途被截断
+# （finish_reason=length），导致 content 字段为空、最终 JSON 缺失。因此这里调大。
+# 若使用 8K 上下文的本地小模型，请按需调小（如 4096）。
+AI_MAX_TOKENS=32768
+```
 
 ### 支持的 AI 接口格式
 
@@ -324,7 +423,7 @@ Smart-Mistake-Lab/
 ├── index.html                  # 入口 HTML
 ├── package.json                # 前端依赖与脚本
 ├── vite.config.js              # Vite 配置（含 API 代理）
-├── .env                        # 环境变量（两套 LLM 配置：IMAGE_ANALYSIS_* / PROBLEM_*）
+├── .env                        # 环境变量（需自行创建，两套 LLM 配置：IMAGE_ANALYSIS_* / PROBLEM_*，见「AI 配置」）
 ├── mistake-notebook.jsx        # 主应用组件（含所有页面逻辑与样式）
 ├── start.ps1                   # Windows PowerShell 一键启动脚本
 ├── start.bat                   # Windows CMD 一键启动脚本

@@ -795,13 +795,17 @@ async def analyze(data: dict):
 
     # 可选：调用方提供的题目内容（非空时跳过图片提取）
     content = (data.get("content") or "").strip() or None
+    # 可选：用户自定义的解题方向/知识范围提示，附加到分析 prompt
+    user_prompt = (data.get("user_prompt") or "").strip() or None
+    # 可选：上一次 AI 生成的解题思路，重新分析时在此基础上改进
+    previous_summary = (data.get("previous_summary") or "").strip() or None
 
     image_config = AiConfig.for_image_analysis()
     problem_config = AiConfig.for_problem_analysis()
 
     subject = _infer_subject(resolved_path)
     logger.info(
-        f'[API] 收到分析请求：{file_path} -> {resolved_path}, subject={subject}, 提供 content={"是" if content else "否"}'
+        f'[API] 收到分析请求：{file_path} -> {resolved_path}, subject={subject}, 提供 content={"是" if content else "否"}, 提供 user_prompt={"是" if user_prompt else "否"}, 提供 previous_summary={"是" if previous_summary else "否"}'
     )
 
     try:
@@ -811,6 +815,8 @@ async def analyze(data: dict):
             problem_config=problem_config,
             subject=subject,
             content=content,
+            user_prompt=user_prompt,
+            previous_summary=previous_summary,
         )
         logger.info(f'[API] 分析完成：{file_path} -> tags={result.get("tags", [])}')
         return result

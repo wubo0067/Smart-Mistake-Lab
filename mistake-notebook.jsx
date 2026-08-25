@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -209,6 +209,27 @@ const CSS = `
 }
 .mnb .save-msg { font-size: 12.5px; color: var(--accent-2); margin-top: 8px; font-weight: 600; }
 .mnb .save-msg.error { color: var(--margin); }
+
+/* AI 重新分析的自定义提示输入 */
+.mnb .reanalyze-prompt { margin: 0 0 14px; }
+.mnb .reanalyze-prompt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px dashed var(--grid);
+  background: none;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.mnb .reanalyze-prompt-toggle:hover { border-color: var(--accent-2); color: var(--accent-2); }
+.mnb .reanalyze-prompt-toggle.open { border-color: var(--accent-2); color: var(--accent-2); background: rgba(59, 130, 246, .06); }
+.mnb .reanalyze-prompt-chevron { transition: transform .2s; }
+.mnb .reanalyze-prompt-toggle.open .reanalyze-prompt-chevron { transform: rotate(180deg); }
 .mnb .error-msg {
   display: flex; align-items: center; gap: 6px;
   font-size: 12.5px; color: var(--margin); margin-top: 8px; font-weight: 600;
@@ -1619,6 +1640,9 @@ export default function App() {
   // 详情页 AI 重新分析
   const [detailAnalyzing, setDetailAnalyzing] = useState(false);
   const [detailAnalyzeMsg, setDetailAnalyzeMsg] = useState(null);
+  // 详情页 AI 重新分析的自定义提示（用户可指定解题方向/知识范围）
+  const [detailUserPrompt, setDetailUserPrompt] = useState('');
+  const [detailPromptOpen, setDetailPromptOpen] = useState(false);
   const titleSavingRef = useRef(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState('');
@@ -2189,6 +2213,8 @@ export default function App() {
     setDetailDirty(false);
     setDetailAnalyzing(false);
     setDetailAnalyzeMsg(null);
+    setDetailUserPrompt('');
+    setDetailPromptOpen(false);
     setEditingTitle(false);
     setEditTitleValue(p.title || '');
     setDetailContent(p.content || '');
@@ -2369,6 +2395,9 @@ export default function App() {
   // --- AI 重新分析（详情弹窗） ---
   async function reanalyzeDetail() {
     if (!detail || detailAnalyzing) return;
+    const prompt = (detailUserPrompt || '').trim();
+    // 上一次 AI 生成的解题思路（若有），让 AI 在既有思路基础上修正/深化
+    const prevSummary = (detail.summary || '').trim();
     setDetailAnalyzing(true);
     setDetailAnalyzeMsg(null);
     setDetailError(null);
@@ -2377,9 +2406,13 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // 若「AI 提取题目内容」编辑框已有内容，直接复用，不再从图片提取
+        // user_prompt：用户自定义的解题方向/知识范围提示（可选）
+        // previous_summary：上一次 AI 解题思路（可选），作为重新分析的参考基础
         body: JSON.stringify({
           file_path: detail.file_path,
-          content: (detailContentRef.current || '').trim() || undefined
+          content: (detailContentRef.current || '').trim() || undefined,
+          user_prompt: prompt || undefined,
+          previous_summary: prevSummary || undefined
         })
       });
       if (!resp.ok) {
@@ -2414,9 +2447,10 @@ export default function App() {
       setDetailDirty(true);
       const added = (Array.isArray(result.tags) ? result.tags : [])
         .filter((t) => !((detail.tags || []).includes(t)));
-      setDetailAnalyzeMsg(added.length > 0
-        ? `AI 重新分析完成：新增 ${added.length} 个标签，解题思路与题目内容已更新。请点击「保存修改」生效。`
-        : 'AI 重新分析完成：解题思路与题目内容已更新，无新增标签。请点击「保存修改」生效。');
+      const promptSuffix = prompt ? '（已按你的提示方向重新分析）' : '';
+      setDetailAnalyzeMsg((added.length > 0
+        ? `AI 重新分析完成：新增 ${added.length} 个标签，解题思路与题目内容已更新。`
+        : 'AI 重新分析完成：解题思路与题目内容已更新，无新增标签。') + `请点击「保存修改」生效${promptSuffix}。`);
     } catch (e) {
       console.error('[ReAnalyze] failed:', e);
       setDetailError('AI 重新分析失败：' + (e.message || '未知错误'));
@@ -3273,6 +3307,24 @@ export default function App() {
               {detailError && <div className="save-msg error" style={{ marginTop: -10, marginBottom: 12 }}>{detailError}</div>}
               {detailSaving && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>保存中…</div>}
               {detailAnalyzeMsg && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>{detailAnalyzeMsg}</div>}
+
+              {/* AI 重新分析的自定义提示：让用户指定解题方向/知识范围 */}
+              <div className="reanalyze-prompt">
+                <button type="button" className={'reanalyze-prompt-toggle' + (detailPromptOpen ? ' open' : '')}
+                  onClick={() => setDetailPromptOpen((v) => !v)}
+                  title="填写后，AI 重新分析会优先按你指定的方向/知识范围解题">
+                  <Target size={13} />
+                  AI 分析方向提示（可选）
+                  <ChevronDown size={13} className="reanalyze-prompt-chevron" />
+                </button>
+                {detailPromptOpen && (
+                  <textarea rows={3} value={detailUserPrompt}
+                    onChange={(e) => setDetailUserPrompt(e.target.value)}
+                    placeholder="告诉 AI 你的解题方向或知识范围，例如：我还没学动能定理，请用受力分析和牛顿第二定律的方法讲解；或：请用初中方法解答…"
+                    style={{ marginTop: 8 }} />
+                )}
+              </div>
+
               <div className="modal-actions">
                 <button className="save-btn" style={{ marginTop: 0 }} onClick={saveDetail} disabled={detailSaving || !detailDirty}>
                   {detailSaving ? '保存中…' : '保存修改'}
