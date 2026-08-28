@@ -363,6 +363,7 @@ def mark_indexed(
     subject: str = "",
     difficulty: int = 3,
 ):
+    """ 将题目标记为已索引，若已存在则更新其元数据。"""
     conn = get_db()
     storage_path = to_db_image_path(file_path, get_config_value("image_dir") or "")
 

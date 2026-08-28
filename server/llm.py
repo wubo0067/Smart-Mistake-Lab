@@ -639,29 +639,99 @@ def _estimate_tokens(text: str) -> int:
     other = len(text) - zh
     return int(zh / 1.5 + other / 4) + 1
 
+# 候选考点 token 预算：注入 prompt 的"候选核心考点"列表所允许占用的最大 token 数。
+# 采用分档策略，可按模型上下文窗口自动选择，也可用 .env 直接覆盖：
+#   - KNOWLEDGE_POINT_TOKENS：显式覆盖（最高优先级，>0 时生效）。
+#   - 本地/小上下文模型（如 Ollama 默认量化模型）：SMALL 档，保守截断。
+#   - 长上下文云端模型（DeepSeek、Qwen3+ 等）：LARGE 档，足以容纳整科知识点。
+DEFAULT_KNOWLEDGE_POINT_TOKENS = 4608  # 兼容旧引用：默认（小上下文）预算
+SMALL_KNOWLEDGE_POINT_TOKENS = 4608  # 本地/小上下文模型
+LARGE_KNOWLEDGE_POINT_TOKENS = 12288  # 长上下文云端模型，可完整包含整科知识点
 
-MAX_KNOWLEDGE_POINT_TOKENS = 4608
+
+def _env_int(name: str, default: int = 0) -> int:
+    """读取整型环境变量，缺失或非法时返回默认值。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _model_context_tier(model: str, api_url: str) -> str:
+    """根据模型名与端点粗略判断上下文档位：'small' 或 'large'。
+
+    判定为 large（长上下文云端模型）的条件（任一命中即可）：
+      - DeepSeek：端点含 deepseek.com 或模型名含 deepseek。
+      - Qwen：模型名解析出的版本号 >= 3（qwen3 / qwen3.5 / qwen3.6 等），
+        或名称含 long / plus / max 等长上下文标记。
+    本地端点（Ollama / localhost）优先按 small 处理：本地部署的模型
+    上下文窗口通常较小且可配置，不适合注入超长知识点列表。
+    其余（含未知模型）按 small 处理。
+    """
+    m = (model or "").lower()
+    url = (api_url or "").lower()
+
+    # 本地/Ollama 端点：无论模型名，一律按保守档处理
+    if not url or is_ollama_chat_endpoint(url) or is_probably_ollama_base_url(url):
+        return "small"
+
+    if "deepseek.com" in url or "deepseek" in m:
+        return "large"
+
+    if "qwen" in m:
+        ver = re.search(r"qwen[^\d]*(\d+(?:\.\d+)?)", m)
+        if ver and float(ver.group(1)) >= 3:
+            return "large"
+        if any(tag in m for tag in ("long", "plus", "max")):
+            return "large"
+
+    return "small"
+
+
+def resolve_knowledge_point_token_budget(model: str = "", api_url: str = "") -> int:
+    """确定候选考点 token 预算：.env 覆盖 > 按模型档位 > 默认。"""
+    override = _env_int("KNOWLEDGE_POINT_TOKENS", 0)
+    if override > 0:
+        return override
+    tier = _model_context_tier(model, api_url)
+    return LARGE_KNOWLEDGE_POINT_TOKENS if tier == "large" else SMALL_KNOWLEDGE_POINT_TOKENS
 
 
 def _normalize_text(text: str) -> str:
+    """将文本归一化为可比较的形式：去掉所有空白字符并转为小写。
+
+    Args:
+        text: 原始文本，允许为 None 或空字符串
+
+    Returns:
+        str: 去除所有空白、统一为小写后的文本；输入为 None/空时返回空字符串
+    """
     return re.sub(r"\s+", "", text or "").lower()
 
 
-def _format_knowledge_points_for_prompt(knowledge_points: list[str]) -> str:
-    """将知识点列表裁剪后拼接进 prompt，避免超出上下文预算。"""
+def _format_knowledge_points_for_prompt(
+    knowledge_points: list[str], max_tokens: int | None = None
+) -> str:
+    """将知识点列表裁剪后拼接进 prompt，避免超出上下文预算。
+
+    Args:
+        knowledge_points: 全量候选知识点列表
+        max_tokens: 候选考点部分的 token 预算；None 时使用默认（小上下文）预算
+    """
     if not knowledge_points:
         return ""
 
+    budget = max_tokens if max_tokens and max_tokens > 0 else DEFAULT_KNOWLEDGE_POINT_TOKENS
     selected_points: list[str] = []
     used_tokens = 0
 
     for point in knowledge_points:
         candidate = f"- {point}"
         candidate_tokens = _estimate_tokens(candidate)
-        if (
-            selected_points
-            and used_tokens + candidate_tokens > MAX_KNOWLEDGE_POINT_TOKENS
-        ):
+        if selected_points and used_tokens + candidate_tokens > budget:
             break
         selected_points.append(candidate)
         used_tokens += candidate_tokens
@@ -739,6 +809,8 @@ def build_analysis_prompt(
     content: str = "",
     user_prompt: str = "",
     previous_summary: str = "",
+    model: str = "",
+    api_url: str = "",
 ) -> str:
     """根据学科、题目内容、用户补充提示和上一次 AI 思路构建分析 prompt
 
@@ -749,11 +821,16 @@ def build_analysis_prompt(
             例如"我还没学动能定理，请用受力分析和牛顿第二定律讲解"
         previous_summary: 上一次 AI 生成的解题思路（可选），用于重新分析时
             在既有思路基础上修正、深化，而不是完全重写
+        model: 解题分析所用模型名（可选），用于自动确定候选考点 token 预算档位
+        api_url: 解题分析所用端点（可选），与 model 一起用于判断上下文档位
     """
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
     role = cfg["role"]
     knowledge_points = cfg["knowledge_points"]
-    knowledge_points_section = _format_knowledge_points_for_prompt(knowledge_points)
+    kp_budget = resolve_knowledge_point_token_budget(model, api_url)
+    knowledge_points_section = _format_knowledge_points_for_prompt(
+        knowledge_points, kp_budget
+    )
 
     # 上一次 AI 解题思路：供重新分析时参考与改进（可选）
     previous_summary_section = ""
@@ -916,6 +993,7 @@ def is_ollama_chat_endpoint(api_url: str) -> bool:
 
 
 def is_deepseek_endpoint(api_url: str) -> bool:
+    """粗略判断是否为 DeepSeek 云端模型端点（兼容 Qwen3+ 等长上下文云端模型）"""
     return "deepseek.com" in api_url.lower()
 
 
@@ -926,6 +1004,10 @@ def is_probably_ollama_base_url(api_url: str) -> bool:
 
 
 def normalize_api_url(api_url: str) -> str:
+    """将用户输入的 API URL 归一化为标准端点格式，方便后续请求构建。
+    - Anthropic 端点：保持原样
+    - Ollama 端点：自动补充 /api/chat 路径
+    - 其他端点：自动补充 /v1/chat/completions 路径"""
     trimmed = api_url.strip()
     if not trimmed:
         return trimmed
@@ -1468,7 +1550,19 @@ async def analyze_image(
         f"[LLM] 调用 AI API（解题分析）: url={problem_api_url}, model={problem_config.model}"
     )
     prompt = build_analysis_prompt(
-        subject, content, user_prompt or "", previous_summary or ""
+        subject,
+        content,
+        user_prompt or "",
+        previous_summary or "",
+        model=problem_config.model,
+        api_url=problem_api_url,
+    )
+    kp_budget = resolve_knowledge_point_token_budget(
+        problem_config.model, problem_api_url
+    )
+    logger.info(
+        f"[LLM] 候选考点 token 预算：{kp_budget}"
+        f"（model={problem_config.model or '未知'}）"
     )
     if user_prompt:
         logger.info(f"[LLM] 已附加用户补充要求：{user_prompt[:120]}")
