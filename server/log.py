@@ -21,6 +21,7 @@ DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 def setup_logger(name: str = 'smart-mistake-lab') -> logging.Logger:
     logger = logging.getLogger(name)
 
+    # 避免重复添加 handler
     if logger.handlers:
         return logger
 
