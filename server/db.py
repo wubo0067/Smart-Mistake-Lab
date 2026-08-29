@@ -719,7 +719,7 @@ def _get_weekday_cn(date_str: str) -> str:
         return ""
 
 
-def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> list[dict]:
+def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> tuple[list[dict], bool]:
     """
     按"天"分页，返回每个日期及其包含的练习记录条目。
     使用单 SQL JOIN 查询，避免 N+1 性能问题。
