@@ -15,6 +15,8 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
 
 
 def get_db():
+    """
+    获取数据库连接，设置 row_factory 为 sqlite3.Row 以便按列名访问"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
