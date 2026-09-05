@@ -18,7 +18,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import db
 from log import logger
-from llm import AiConfig, analyze_image, generate_encouragements
+from llm import (
+    AiConfig,
+    analyze_image,
+    generate_encouragements,
+    rerank_similar_problems,
+)
+import similar
 from path_resolver import is_path_within_directory, resolve_image_path
 
 
@@ -774,6 +780,141 @@ def update_ai_config(data: dict):
         "[ai-config] 写接口已废弃：LLM 配置仅由 .env 管理，本次修改请求已忽略"
     )
     return get_ai_config()
+
+
+# --- 找相似题 ---
+
+# LLM 精排最多只吃前 15 个本地候选（控制 prompt 规模与耗时）
+_SMART_RERANK_CAP = 15
+# 文本查询的最短长度（汉字/字符）；太短时字符级相似度无区分度
+_MIN_QUERY_TEXT_LEN = 6
+
+
+@app.post("/api/images/find-similar")
+async def find_similar(data: dict):
+    """在题库中查找与一段题目文本（或与某道库内题）相似/相同/变体的题。
+
+    两级检索：
+      - 本地粗筛（similar.find_similar_problems）：字符 bigram + 数字/字母
+        归一化 + 标签 IoU + 学科加分，毫秒级返回 Top K；
+      - 可选智能精排（smart=true）：把候选的 title+summary+tags 交给文本
+        LLM，让它挑出真正相关并给出理由；失败时自动降级为本地结果。
+
+    body:
+        text: 粘贴的题目文字（与 file_path 二选一，至少提供其一）
+        file_path: 库内题路径（找这道题的相似题，自动排除自身）
+        smart: 是否启用 LLM 精排（默认 false）
+        top_k: 本地候选数上限 1~50（默认 15）
+
+    returns:
+        {"mode": "fast"|"smart"|"fast_degraded", "query_text": str,
+         "results": [{...题目字段, score, match_kind, reason?}, ...]}
+    """
+    text = (data.get("text") or "").strip()
+    file_path = (data.get("file_path") or "").strip()
+    smart = bool(data.get("smart"))
+    top_k = data.get("top_k")
+    try:
+        top_k = max(1, min(50, int(top_k or 15)))
+    except (TypeError, ValueError):
+        top_k = 15
+
+    if not text and not file_path:
+        raise HTTPException(
+            status_code=400,
+            detail="请提供题目内容（text），或选择题库中的一道题（file_path）",
+        )
+
+    query_text = text
+    query_tags = None
+    query_subject = ""
+    exclude_file_path = ""
+    source_label = "text"
+
+    if file_path:
+        meta = db.get_image_by_path(file_path)
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"题库中不存在：{file_path}")
+        # 用数据库规范路径做排除（兼容 Windows 分隔符差异）
+        exclude_file_path = meta.get("file_path") or file_path
+        query_text = (
+            (meta.get("content") or "").strip()
+            or (meta.get("summary") or "").strip()
+            or (meta.get("title") or "").strip()
+        )
+        query_tags = meta.get("tags") or None
+        query_subject = meta.get("subject") or ""
+        source_label = f"file_path={file_path}"
+        logger.info(
+            f"[find-similar] 库内题找相似：{exclude_file_path}, "
+            f"tags={query_tags}, subject={query_subject}"
+        )
+
+    query_text = query_text[:4000]
+    if len(query_text) < _MIN_QUERY_TEXT_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"题目内容太短（至少 {_MIN_QUERY_TEXT_LEN} 个字符），请提供更多题干文字",
+        )
+
+    logger.info(
+        f"[find-similar] 请求：source={source_label}, smart={smart}, "
+        f"top_k={top_k}, query_len={len(query_text)}"
+    )
+
+    try:
+        results = similar.find_similar_problems(
+            query_text,
+            query_tags=query_tags,
+            query_subject=query_subject,
+            top_k=top_k,
+            exclude_file_path=exclude_file_path,
+        )
+    except Exception as exc:  # 粗筛不应失败；万一失败给出可读错误
+        logger.exception(f"[find-similar] 本地粗筛异常：{exc}")
+        raise HTTPException(status_code=500, detail=f"本地粗筛失败：{exc}")
+
+    if not smart or not results:
+        return {"mode": "fast", "query_text": query_text, "results": results}
+
+    # ---- LLM 智能精排（失败自动降级为本地结果） ----
+    ai_view = results[:_SMART_RERANK_CAP]
+    tail = results[_SMART_RERANK_CAP:]
+    try:
+        entries = await rerank_similar_problems(query_text, ai_view)
+    except (ValueError, RuntimeError) as exc:
+        logger.warning(f"[find-similar] LLM 精排不可用，降级为本地结果：{exc}")
+        return {"mode": "fast_degraded", "query_text": query_text, "results": results}
+    except Exception as exc:
+        logger.exception(f"[find-similar] LLM 精排异常，降级为本地结果：{exc}")
+        return {"mode": "fast_degraded", "query_text": query_text, "results": results}
+
+    if not entries:
+        logger.warning("[find-similar] LLM 未返回有效精排条目，降级为本地结果")
+        return {"mode": "fast_degraded", "query_text": query_text, "results": results}
+
+    # AI 命中的候选按 AI 相关度顺序排前（kind/reason 以 AI 为准），
+    # 未入选的本地候选接在后面（kind 保持本地判断，reason 为空）
+    picked: set[int] = set()
+    ordered: list[dict] = []
+    for entry in entries:
+        idx = entry["index"]
+        if idx < 0 or idx >= len(ai_view) or idx in picked:
+            continue
+        picked.add(idx)
+        cand = ai_view[idx]
+        cand["match_kind"] = entry["kind"]
+        cand["reason"] = entry["reason"]
+        ordered.append(cand)
+    for idx, cand in enumerate(ai_view):
+        if idx not in picked:
+            ordered.append(cand)
+    ordered.extend(tail)
+
+    logger.info(
+        f"[find-similar] 精排完成：命中 {len(picked)} 条，本地候选 {len(results)} 条"
+    )
+    return {"mode": "smart", "query_text": query_text, "results": ordered}
 
 
 # --- AI Analyze ---

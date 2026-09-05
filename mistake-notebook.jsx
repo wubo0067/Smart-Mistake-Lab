@@ -99,6 +99,13 @@ const API = {
   async getTimeline(offset) {
     return (await apiFetch(`/api/timeline?offset=${offset}`)).json();
   },
+  async findSimilar(payload) {
+    return (await apiFetch('/api/images/find-similar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })).json();
+  },
   imageUrl(filePath) {
     return `/api/image-file?path=${encodeURIComponent(filePath)}`;
   }
@@ -1153,6 +1160,144 @@ const CSS = `
   font-size: 12px;
   color: var(--pencil);
 }
+
+/* ===== 找相似题 ===== */
+.mnb .similar-open-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1.5px solid var(--accent-2); background: #E8F5F2; color: #1F6F63;
+  border-radius: 7px; padding: 6px 13px; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; white-space: nowrap; transition: all .12s;
+  font-family: inherit;
+}
+.mnb .similar-open-btn:hover { background: var(--accent-2); color: #fff; }
+.mnb .similar-open-btn:active { transform: translateY(1px); }
+
+.mnb .similar-modal-overlay { z-index: 58; }
+.mnb .similar-modal { max-width: 940px; }
+.mnb .similar-desc b { color: var(--accent-2); }
+
+.mnb .similar-source-row { }
+.mnb .similar-source-chip {
+  display: inline-flex; align-items: center; gap: 5px; max-width: 440px;
+  background: #FFF6E0; border: 1px solid var(--accent); color: #6B5314;
+  border-radius: 999px; padding: 4px 13px; font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mnb .similar-small-btn {
+  border: 1.5px solid var(--grid); background: var(--paper); color: var(--ink-soft);
+  border-radius: 6px; padding: 4px 11px; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all .12s;
+}
+.mnb .similar-small-btn:hover { border-color: var(--accent-2); color: var(--accent-2); }
+
+.mnb .similar-options {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 8px 0 2px;
+}
+.mnb .similar-check {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer; user-select: none;
+}
+.mnb .similar-check input[type="checkbox"] {
+  width: 16px; height: 16px; accent-color: var(--accent-2); cursor: pointer;
+}
+.mnb .similar-check-hint { font-size: 11.5px; color: var(--pencil); font-weight: 400; }
+.mnb .similar-topk {
+  border: 1.5px solid var(--grid); border-radius: 6px; padding: 3px 6px;
+  font-size: 12.5px; color: var(--ink); background: var(--paper);
+  font-family: inherit; outline: none; cursor: pointer;
+}
+.mnb .similar-topk:focus { border-color: var(--accent-2); }
+.mnb .similar-topk:disabled { opacity: .5; cursor: not-allowed; }
+
+.mnb .similar-loading {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 26px 0; color: var(--ink-soft); font-size: 13px;
+}
+
+.mnb .similar-result { margin-top: 14px; border-top: 1px dashed var(--grid); padding-top: 14px; }
+.mnb .similar-result-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.mnb .similar-mode-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 12px;
+  border: 1.5px solid var(--grid); color: var(--ink-soft); background: var(--paper);
+}
+.mnb .similar-mode-badge.smart { border-color: var(--accent-2); color: #1F6F63; background: #E8F5F2; }
+.mnb .similar-mode-badge.degraded { border-color: var(--margin); color: #a83232; background: #FDF0F0; }
+.mnb .similar-result-count { font-size: 12px; color: var(--ink-soft); }
+.mnb .similar-degraded-banner {
+  background: #FDF3E3; border: 1.5px solid #E6C98A; color: #7A5A12;
+  border-radius: 8px; padding: 9px 13px; font-size: 12.5px; line-height: 1.6; margin-bottom: 12px;
+}
+
+.mnb .similar-list { display: flex; flex-direction: column; gap: 10px; }
+.mnb .similar-item {
+  display: flex; gap: 12px; align-items: stretch;
+  border: 1.5px solid var(--grid); border-radius: 10px; padding: 10px;
+  background: var(--card); cursor: pointer; transition: all .13s;
+}
+.mnb .similar-item:hover {
+  border-color: var(--accent-2); box-shadow: 0 4px 14px var(--shadow);
+  transform: translateY(-1px);
+}
+.mnb .similar-item-thumb {
+  width: 84px; min-width: 84px; height: 84px; border-radius: 7px; overflow: hidden;
+  background: var(--grid); border: 1px solid var(--grid);
+  display: flex; align-items: center; justify-content: center;
+}
+.mnb .similar-item-thumb img {
+  width: 100%; height: 100%; object-fit: contain; display: block;
+  border: none; border-radius: 4px; margin: 0; padding: 2px; box-sizing: border-box;
+}
+.mnb .similar-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.mnb .similar-item-title {
+  font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;
+  color: var(--ink);
+}
+.mnb .similar-item-title .similar-rank {
+  font-size: 11px; color: var(--pencil);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace; font-weight: 600;
+}
+.mnb .similar-item-title .similar-score {
+  margin-left: auto; font-size: 11.5px; color: var(--ink-soft); font-weight: 600; white-space: nowrap;
+}
+.mnb .similar-item-tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.mnb .similar-subject-chip {
+  font-size: 10.5px; font-weight: 700; background: var(--ink); color: var(--paper);
+  border-radius: 999px; padding: 2px 8px;
+}
+.mnb .similar-tag-chip {
+  font-size: 10.5px; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  background: #FFF6E0; border: 1px solid var(--accent); color: #6B5314;
+  border-radius: 999px; padding: 2px 7px;
+}
+.mnb .similar-item-summary {
+  font-size: 12.5px; color: #1b3f7a; line-height: 1.6;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; opacity: .92;
+}
+.mnb .similar-item-reason {
+  font-size: 12px; color: var(--ink-soft); background: #F3F7FC; border: 1px solid var(--grid);
+  border-radius: 7px; padding: 5px 9px; line-height: 1.5;
+}
+.mnb .similar-item-side {
+  display: flex; align-items: center; justify-content: center;
+  padding-left: 4px; border-left: 1px dashed var(--grid);
+}
+.mnb .similar-kind {
+  font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 4px 11px; white-space: nowrap;
+  border: 1.5px solid currentColor;
+}
+.mnb .similar-kind.same { color: #1f8a55; background: #E9F7EF; }
+.mnb .similar-kind.variant { color: #a97f12; background: #FBF3DC; }
+.mnb .similar-kind.similar { color: #3b6cc4; background: #EAF1FC; }
+.mnb .similar-kind.weak { color: #7b8494; background: #F1F2F5; }
+@media (max-width: 700px) {
+  .mnb .similar-item { flex-wrap: wrap; }
+  .mnb .similar-item-thumb { width: 100%; height: 140px; min-width: 0; }
+  .mnb .similar-item-side { border-left: none; padding-left: 0; justify-content: flex-start; }
+}
 `;
 
 // ============== TAG PILL (with inline editing) ==============
@@ -1273,6 +1418,14 @@ const MASTERY_META = {
   mastered: { label: '已掌握', color: '#2E9E5B' }, // 绿灯
   practice: { label: '勤复习', color: '#D9A013' }, // 黄灯
   unfamiliar: { label: '待攻克', color: '#D64545' }, // 红灯（默认）
+};
+
+// 找相似题的匹配类型（与后端 similar.py 的 match_kind 一致）
+const SIMILAR_KIND_META = {
+  same: { label: '同题', icon: '🟢', color: '#1f8a55', desc: '与输入题目相同或几乎相同' },
+  variant: { label: '变体', icon: '🟡', color: '#a97f12', desc: '与输入题目结构相同，数据或字母等略有变化' },
+  similar: { label: '类似', icon: '🔵', color: '#3b6cc4', desc: '考查相似知识点与题型' },
+  weak: { label: '弱相关', icon: '⚪', color: '#7b8494', desc: '相关性较弱，仅供参考' },
 };
 
 function MasteryLight({ mastery, size = 12 }) {
@@ -1657,8 +1810,10 @@ export default function App() {
   const solutionImagesRef = useRef([]);
   const solutionFileInputRef = useRef(null);
   const solutionTextareaRef = useRef(null);
-  // 记录详情页来源（library/focus/timeline），决定保存时是否写时间线
+  // 记录详情页来源（library/focus/timeline/similar），决定保存时是否写时间线
   const detailSourceRef = useRef('library');
+  // 详情页来源 Tab（library/focus/timeline/similar）——决定详情弹窗里上下题翻页所用的列表
+  const [detailSourceTab, setDetailSourceTab] = useState('library');
 
   const [previewSolutionImage, setPreviewSolutionImage] = useState(null);
 
@@ -1666,6 +1821,18 @@ export default function App() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteMode, setDeleteMode] = useState('index'); // 'index' | 'purge'
   const [deleting, setDeleting] = useState(false);
+
+  // --- 找相似题（Similar finder modal）---
+  const [similarOpen, setSimilarOpen] = useState(false);
+  const [similarText, setSimilarText] = useState('');
+  // 从详情页打开时为该题的 file_path（用题干+知识点查找并排除自身）；从库工具栏打开为 null（手动粘贴文本）
+  const [similarSourceFile, setSimilarSourceFile] = useState(null);
+  const [similarSmart, setSimilarSmart] = useState(false); // 是否用 AI 智能精排
+  const [similarTopK, setSimilarTopK] = useState(15);
+  const [similarBusy, setSimilarBusy] = useState(false);
+  const [similarError, setSimilarError] = useState(null);
+  // { mode, query_text, results }；results 同时用于详情弹窗的相似结果翻页
+  const [similarResult, setSimilarResult] = useState(null);
 
   // --- Load configs on mount ---
   useEffect(() => {
@@ -2139,10 +2306,13 @@ export default function App() {
 
   // --- Detail pagination derived state (source depends on current tab) ---
   const detailPaginationSource = useMemo(() => {
+    if (detailSourceTab === 'similar') {
+      return (similarResult && Array.isArray(similarResult.results)) ? similarResult.results : [];
+    }
     if (tab === 'focus') return focusItems;
     if (tab === 'timeline') return timelineDays.flatMap(d => d.items);
     return flattenedGrouped;
-  }, [tab, focusItems, flattenedGrouped, timelineDays]);
+  }, [tab, focusItems, flattenedGrouped, timelineDays, detailSourceTab, similarResult]);
 
   const detailIndex = useMemo(() => {
     if (!detail) return -1;
@@ -2153,20 +2323,26 @@ export default function App() {
   const hasNext = detailIndex >= 0 && detailIndex < detailPaginationSource.length - 1;
   const prevProblem = hasPrev ? detailPaginationSource[detailIndex - 1] : null;
   const nextProblem = hasNext ? detailPaginationSource[detailIndex + 1] : null;
-  const detailPositionText = detailIndex >= 0 ? `第 ${detailIndex + 1} / ${detailPaginationSource.length} 题` : '';
+  const detailPositionText = detailIndex >= 0
+    ? (detailSourceTab === 'similar'
+      ? `相似结果 ${detailIndex + 1} / ${detailPaginationSource.length} 条`
+      : `第 ${detailIndex + 1} / ${detailPaginationSource.length} 题`)
+    : '';
 
   // Auto-close detail if current problem no longer in filtered
+  // （similar 弹窗打开期间不自动关闭详情，避免正在进行的相似查找打断详情浏览）
   useEffect(() => {
-    if (detail && detailIndex === -1) {
+    if (detail && detailIndex === -1 && !similarOpen) {
       setDetail(null);
       setPreviewSolutionImage(null);
     }
-  }, [detailIndex]);
+  }, [detailIndex, similarOpen]);
 
   // Keyboard navigation for detail modal (ArrowLeft/ArrowRight)
   useEffect(() => {
     if (!detail || previewSolutionImage || showDeleteConfirm) return;
     const handler = (e) => {
+      if (similarOpen) return;
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); goToPrevProblem(); }
@@ -2174,7 +2350,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [detail, previewSolutionImage, showDeleteConfirm, hasPrev, hasNext, detailDirty]);
+  }, [detail, previewSolutionImage, showDeleteConfirm, hasPrev, hasNext, detailDirty, similarOpen]);
 
   function switchSubject(subj) {
     setActiveSubject(subj);
@@ -2206,6 +2382,7 @@ export default function App() {
   // --- Detail modal ---
   function openDetail(p, source = 'library') {
     detailSourceRef.current = source;
+    setDetailSourceTab(source);
     const sol = (typeof p.solution === 'string' ? JSON.parse(p.solution || '{}') : (p.solution || {}));
     setDetail(p);
     setDetailTagInput('');
@@ -2287,6 +2464,74 @@ export default function App() {
     setDetailError(null);
     setDetail(null);
     setPreviewSolutionImage(null);
+  }
+
+  // --- 找相似题 ---
+  // sourceFile：从详情页打开时传入该题的 file_path（自动用题干+知识点查找、排除自身）；
+  // 从库工具栏打开时传 null（手动粘贴题目文字）
+  function openSimilarFinder(sourceFile) {
+    let seed = '';
+    // 库工具栏打开时，若搜索框已有 ≥6 字的文字，自动预填到输入框
+    if (!sourceFile && query && query.trim().length >= 6) {
+      seed = query;
+    }
+    setSimilarSourceFile(sourceFile);
+    setSimilarText(seed);
+    setSimilarSmart(false);
+    setSimilarTopK(15);
+    setSimilarBusy(false);
+    setSimilarError(null);
+    setSimilarResult(null);
+    setSimilarOpen(true);
+  }
+
+  function openSimilarFromDetail() {
+    if (!detail) return;
+    if (detailDirty) {
+      setDetailError('当前有未保存修改，请先点击"保存修改"');
+      return;
+    }
+    openSimilarFinder(detail.file_path);
+  }
+
+  async function runSimilarSearch() {
+    setSimilarError(null);
+    const smart = !!similarSmart;
+    const topK = Number(similarTopK) || 15;
+    let payload;
+    if (similarSourceFile) {
+      payload = { file_path: similarSourceFile, smart, top_k: topK };
+    } else {
+      const text = similarText.trim();
+      if (text.length < 6) {
+        setSimilarError('请输入至少 6 个字的题目内容');
+        return;
+      }
+      payload = { text, smart, top_k: topK };
+    }
+    setSimilarBusy(true);
+    setSimilarResult(null);
+    try {
+      const resp = await API.findSimilar(payload);
+      setSimilarResult(resp);
+    } catch (e) {
+      console.error('[findSimilar] 失败', e);
+      setSimilarError(e.message || '查找失败，请稍后重试');
+    } finally {
+      setSimilarBusy(false);
+    }
+  }
+
+  // 点击相似结果卡片：关闭弹窗并用「相似结果列表」作为翻页源打开详情
+  function openSimilarResult(r) {
+    setSimilarOpen(false);
+    openDetail(r, 'similar');
+  }
+
+  function closeSimilarFinder() {
+    if (similarBusy) return;
+    setSimilarOpen(false);
+    setSimilarResult(null);
   }
 
   function goToPrevProblem() {
@@ -2958,6 +3203,10 @@ export default function App() {
                           <input type="text" placeholder="搜索标题、内容或标签" value={query}
                             onChange={(e) => setQuery(e.target.value)} />
                         </div>
+                        <button className="similar-open-btn" onClick={() => openSimilarFinder(null)}
+                          title="拿一道题来，在错题库中查找相同 / 变体 / 类似的题目（本地快筛，可勾选 AI 智能判断）">
+                          🔍 找相似题
+                        </button>
                         <label className="date-filter-check">
                           <input type="checkbox" checked={dateFilterEnabled}
                             onChange={(e) => setDateFilterEnabled(e.target.checked)} />
@@ -3335,6 +3584,11 @@ export default function App() {
                   {detailAnalyzing ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
                   {detailAnalyzing ? 'AI 分析中…' : 'AI 重新分析'}
                 </button>
+                <button className="save-btn secondary similar-detail-btn" style={{ marginTop: 0 }}
+                  onClick={openSimilarFromDetail} disabled={detailSaving}
+                  title="根据当前题目的题干和知识点，在错题库中查找相同 / 变体 / 类似的题（自动排除本题）">
+                  🔍 找相似
+                </button>
                 <button className={'focus-btn' + (detail.is_focus_practice === 1 ? ' active' : '')}
                   style={{ marginTop: 0 }}
                   onClick={async () => {
@@ -3354,6 +3608,160 @@ export default function App() {
               </div>
               {focusError && <div className="save-msg error" style={{ marginTop: 8 }}>{focusError}</div>}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============ 找相似题弹窗 ============ */}
+      {similarOpen && (
+        <div className="modal-overlay similar-modal-overlay" onClick={() => { if (!similarBusy) closeSimilarFinder(); }}>
+          <div className="modal similar-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close" onClick={closeSimilarFinder} disabled={similarBusy}>
+              <X size={16} />
+            </button>
+            <h2 style={{ fontSize: 18, marginBottom: 8 }}>🔍 找相似题</h2>
+            <p className="similar-desc" style={{ fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.7, marginBottom: 12 }}>
+              {similarSourceFile ? (
+                <>拿当前这道题去错题库里找<b>相同 / 变体 / 类似</b>的题：自动使用它的题干文字和知识点标签，并排除它本身。</>
+              ) : (
+                <>拿一道题来，在错题库中查找<b>相同 / 变体 / 类似</b>的题：可以直接粘贴题目文字（例如拍照识别的题干）。</>
+              )}
+            </p>
+
+            {similarSourceFile && (
+              <div className="similar-source-row" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                <span className="similar-source-chip" title={detail?.file_path}>
+                  📄 {detail?.title || detail?.file_path || '当前题目'}
+                </span>
+                <button type="button" className="similar-small-btn"
+                  onClick={() => { if (!similarBusy) setSimilarSourceFile(null); }}
+                  title="改为手动粘贴题目文字再查找">
+                  改为手动输入文字
+                </button>
+              </div>
+            )}
+
+            {!similarSourceFile && (
+              <div className="field" style={{ marginBottom: 8 }}>
+                <label className="field-label">
+                  题目文字
+                  <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--pencil)', marginLeft: 6 }}>
+                    （至少 6 个字，越完整越准确）
+                  </span>
+                </label>
+                <textarea rows={4} value={similarText}
+                  onChange={(e) => setSimilarText(e.target.value)}
+                  placeholder="粘贴题目文字，例如：甲乙两地相距 240 千米，一辆汽车从甲地开往乙地，每小时行 60 千米，几小时可以到达？" />
+              </div>
+            )}
+
+            <div className="similar-options">
+              <label className="similar-check" title="勾选后会把本地候选交给 AI 智能判断同题 / 变体 / 类似，并说明判断理由；AI 不可用时自动退回本地快筛结果">
+                <input type="checkbox" checked={similarSmart}
+                  onChange={(e) => setSimilarSmart(e.target.checked)} disabled={similarBusy} />
+                <span>用 AI 智能判断</span>
+                <span className="similar-check-hint">更准，但需要 AI 可用</span>
+              </label>
+              <label className="similar-check" style={{ gap: 4 }}>
+                <span style={{ color: 'var(--ink-soft)', fontWeight: 500 }}>显示</span>
+                <select className="similar-topk" value={similarTopK}
+                  onChange={(e) => setSimilarTopK(Number(e.target.value))} disabled={similarBusy}>
+                  {[10, 15, 20, 30].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <span style={{ color: 'var(--ink-soft)', fontWeight: 500 }}>条</span>
+              </label>
+            </div>
+
+            <div className="modal-actions" style={{ borderTop: 'none', paddingTop: 10, justifyContent: 'flex-end' }}>
+              <button className="save-btn" style={{ marginTop: 0 }}
+                onClick={runSimilarSearch}
+                disabled={similarBusy || (!similarSourceFile && similarText.trim().length < 6)}>
+                {similarBusy ? <Loader2 size={14} className="spin" /> : '🔍'}
+                {similarBusy ? '查找中…' : '查找相似题'}
+              </button>
+            </div>
+
+            {similarError && <div className="save-msg error" style={{ marginTop: 4 }}>{similarError}</div>}
+
+            {similarBusy && (
+              <div className="similar-loading">
+                <Loader2 size={18} className="spin" />
+                {similarSmart ? '正在比对并调用 AI 精排，请稍候…' : '正在本地题库中比对文字与知识点…'}
+              </div>
+            )}
+
+            {!similarBusy && similarResult && (
+              <div className="similar-result">
+                <div className="similar-result-head">
+                  <span className={'similar-mode-badge ' + (similarResult.mode === 'smart' ? 'smart' : similarResult.mode === 'fast_degraded' ? 'degraded' : 'fast')}>
+                    {similarResult.mode === 'smart' ? '✨ AI 智能精排' : similarResult.mode === 'fast_degraded' ? '⚠️ 已自动退回本地' : '⚡ 本地快筛'}
+                  </span>
+                  {similarResult.results.length > 0 && (
+                    <span className="similar-result-count">
+                      共 {similarResult.results.length} 条结果，相关度由高到低
+                    </span>
+                  )}
+                </div>
+
+                {similarResult.mode === 'fast_degraded' && (
+                  <div className="similar-degraded-banner">
+                    AI 智能判断当前不可用，已自动切换到本地快筛结果。你可以稍后重试，或在设置中检查 AI 配置。
+                  </div>
+                )}
+
+                {similarResult.results.length === 0 ? (
+                  <div className="empty" style={{ padding: '28px 12px' }}>
+                    <Search size={30} />
+                    <p>没有找到相似题目</p>
+                    <p style={{ fontSize: 12, opacity: 0.75, maxWidth: 420, margin: '0 auto' }}>
+                      试试：输入更完整的题干文字 / 勾选「用 AI 智能判断」以放宽为同类题型 / 增加显示条数
+                    </p>
+                  </div>
+                ) : (
+                  <div className="similar-list">
+                    {similarResult.results.map((r, i) => {
+                      const kind = r.match_kind && SIMILAR_KIND_META[r.match_kind] ? r.match_kind : 'weak';
+                      const kindMeta = SIMILAR_KIND_META[kind];
+                      return (
+                        <div key={r.file_path} className="similar-item"
+                          onClick={() => openSimilarResult(r)} title="点击打开该题详情（可左右翻页浏览全部结果）">
+                          <div className="similar-item-thumb">
+                            <img src={API.imageUrl(r.file_path)} alt={r.title} loading="lazy" />
+                          </div>
+                          <div className="similar-item-body">
+                            <div className="similar-item-title">
+                              {r.title || '未命名题目'}
+                              <span className="similar-rank">#{i + 1}</span>
+                              <span className="similar-score" title="与输入题目的综合相关度">相关度 {Math.round((r.score || 0) * 100)}%</span>
+                            </div>
+                            <div className="similar-item-tags">
+                              <span className="similar-subject-chip">{r.subject || ''}</span>
+                              {(r.tags || []).slice(0, 4).map((t) => (
+                                <span key={t} className="similar-tag-chip">{t}</span>
+                              ))}
+                              {(r.practice_count > 0) && (
+                                <span className="similar-tag-chip" style={{ background: '#F3F7FC', borderColor: 'var(--grid)', color: 'var(--ink-soft)' }}>
+                                  练习 {r.practice_count} 次
+                                </span>
+                              )}
+                            </div>
+                            <div className="similar-item-summary">{r.summary || '（暂无解题思路摘要）'}</div>
+                            {r.reason && (
+                              <div className="similar-item-reason">💬 {r.reason}</div>
+                            )}
+                          </div>
+                          <div className="similar-item-side">
+                            <span className={'similar-kind ' + kind} title={kindMeta.desc}>
+                              {kindMeta.icon} {kindMeta.label}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

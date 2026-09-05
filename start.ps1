@@ -69,18 +69,17 @@ function Join-NativeArgumentList {
     )
 
     return ($Arguments | ForEach-Object {
-        if ($_ -match '[\s"]') {
-            '"{0}"' -f ($_ -replace '"', '\\"')
-        }
-        else {
-            $_
-        }
-    }) -join ' '
+            if ($_ -match '[\s"]') {
+                '"{0}"' -f ($_ -replace '"', '\\"')
+            }
+            else {
+                $_
+            }
+        }) -join ' '
 }
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ServerDir = Join-Path $RootDir "server"
-$BackendHost = if ($Ip) { $Ip } else { "127.0.0.1" }
 $FrontendHost = if ($Ip) { $Ip } else { "localhost" }
 
 $PowerShellExe = if (Test-Path "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe") {
@@ -147,12 +146,31 @@ if (-not $NoFrontend) {
     # New: Open Chrome to the frontend URL
     $FrontendUrl = "http://$($FrontendHost):5173"
     Write-Host "  正在尝试打开浏览器访问: $FrontendUrl" -ForegroundColor Gray
+    # chrome 通常不在 PATH 中，需从注册表 App Paths 或常见安装位置解析
+    $chromeExe = $null
+    $chromeAppPath = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)'
+    if ($chromeAppPath -and (Test-Path $chromeAppPath)) {
+        $chromeExe = $chromeAppPath
+    }
+    else {
+        foreach ($candidate in @(
+                "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+                "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+                "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+            )) {
+            if (Test-Path $candidate) {
+                $chromeExe = $candidate
+                break
+            }
+        }
+    }
+
     try {
-        $chromeExe = Resolve-CommandPath -Name "chrome"
-        if ($chromeExe -and $chromeExe -ne "chrome") {
+        if ($chromeExe) {
             Start-Process $chromeExe $FrontendUrl 2>$null
         }
         else {
+            # 没找到 Chrome，用系统默认浏览器打开
             Start-Process $FrontendUrl 2>$null
         }
     }

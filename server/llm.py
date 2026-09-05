@@ -1839,3 +1839,143 @@ async def generate_encouragements(items: list[dict]) -> dict:
 
     logger.info(f"[Encourage] 全部完成，成功生成 {len(result)}/{len(items)} 条鼓励语")
     return result
+
+
+# ============== 相似题精排（LLM 二次确认） ==============
+
+SIMILAR_RERANK_PROMPT = """你是一名严谨的题目查重助手，负责在一批“候选错题”中挑出与“查询题”真正相关的那几道。
+
+<查询题>
+{query}
+</查询题>
+
+<候选错题>
+{numbered}
+</候选错题>
+
+判断标准（由强到弱）：
+- same：与查询题是同一道题（数值、图形、问法都一致）
+- variant：同题变体——只换了数字 / 字母命名 / 图形方向等，考点与解法结构一致
+- similar：不是同一道题，但考查同一个知识点 / 解题模型，可以互相借鉴
+- 只是背景相似但实际无关的，不要入选
+
+只输出一个 JSON 对象，不要输出任何其他文字，不要用 markdown 代码块包裹：
+{{"ranked": [{{"index": 0, "kind": "same", "reason": "一句话理由（40 字内）"}}]}}
+
+要求：
+- index 必须来自上面候选错题的编号
+- 按相关度从高到低排列
+- 一道都不相关时输出 {{"ranked": []}}
+"""
+
+_CANDIDATE_SUMMARY_CAP = 220  # 每个候选摘要截断长度（字符），控制 prompt 规模
+
+
+def parse_similar_rerank_result(raw_text: str) -> list[dict]:
+    """解析精排响应，返回按相关度降序的 [{index, kind, reason}, ...]。
+
+    兼容 {"ranked": [...]} 与顶层数组两种形态；字段缺失或类型错误的条目会被丢弃。
+    """
+    if not raw_text or not raw_text.strip():
+        return []
+
+    payload: Any = None
+    try:
+        payload = load_json_relaxed(raw_text)
+    except json.JSONDecodeError:
+        # 退而求其次：从末尾尝试提取 JSON（推理模型常在结尾输出答案）
+        tail = _extract_json_from_tail(raw_text)
+        if not tail:
+            logger.warning(f"[Rerank] 精排响应无法解析为 JSON：{raw_text[:200]}")
+            return []
+        try:
+            payload = json.loads(tail)
+        except json.JSONDecodeError:
+            logger.warning(f"[Rerank] 精排响应不是合法 JSON：{raw_text[:200]}")
+            return []
+
+    ranked = payload.get("ranked") if isinstance(payload, dict) else payload
+    if isinstance(payload, dict) and not isinstance(ranked, list):
+        # 兼容直接输出单个对象 {"index": ..., "kind": ..., "reason": ...}
+        ranked = [payload]
+    if not isinstance(ranked, list):
+        logger.warning(f"[Rerank] 期望数组形态，实际得到 {type(ranked).__name__}")
+        return []
+
+    entries: list[dict] = []
+    seen: set[int] = set()
+    for raw in ranked:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            index = int(raw.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if index in seen:
+            continue
+        seen.add(index)
+        kind = str(raw.get("kind") or "").strip().lower()
+        if kind not in ("same", "variant", "similar"):
+            continue
+        reason = str(raw.get("reason") or "").strip()
+        entries.append({"index": index, "kind": kind, "reason": reason})
+    return entries
+
+
+async def rerank_similar_problems(
+    query_text: str,
+    candidates: list[dict],
+    config: Optional[AiConfig] = None,
+    api_url: str = "",
+) -> list[dict]:
+    """让 LLM 从本地粗筛候选里挑出真正相关（same/variant/similar）的题。
+
+    Args:
+        query_text: 查询题的完整文本（最长取前 2000 字）
+        candidates: find_similar_problems() 返回的候选 dict 列表
+        config: AI 配置，默认读取 .env 的解题分析配置（纯文本模型即可）
+        api_url: 已归一化端点；未提供时按 config.api_url 归一化
+
+    Returns:
+        按相关度降序的条目列表：
+        [{"index": int（指向 candidates 的下标）, "kind": str, "reason": str}, ...]
+
+    Raises:
+        ValueError: AI 配置不完整
+        RuntimeError: AI 调用失败
+    """
+    if config is None:
+        config = AiConfig.for_problem_analysis()
+    if not api_url:
+        api_url = normalize_api_url(config.api_url)
+    if not api_url or not config.model.strip():
+        raise ValueError("AI 配置不完整（相似题精排）：请设置 API URL 和模型名")
+    if should_require_api_key(api_url) and not config.api_key:
+        raise ValueError("该端点需要 API Key（相似题精排）")
+
+    # 压缩候选文本：title 截断 + summary 前段 + tags，控制输入规模
+    lines: list[str] = []
+    for i, cand in enumerate(candidates):
+        summary = (cand.get("summary") or "").strip()
+        if len(summary) > _CANDIDATE_SUMMARY_CAP:
+            summary = summary[:_CANDIDATE_SUMMARY_CAP] + "……"
+        tags = "、".join(cand.get("tags") or [])[:80]
+        lines.append(
+            f"[{i}] 标题：{(cand.get('title') or '').strip()[:60]}\n"
+            f"    解题思路摘要：{summary or '（无）'}\n"
+            f"    知识点标签：{tags or '（无）'}"
+        )
+    numbered = "\n".join(lines)
+    prompt = SIMILAR_RERANK_PROMPT.format(
+        query=(query_text or "").strip()[:2000], numbered=numbered
+    )
+
+    logger.info(
+        f"[Rerank] 精排调用 AI：url={api_url}, model={config.model}, "
+        f"candidates={len(candidates)}, prompt_len={len(prompt)}"
+    )
+    response_text = await _call_ai(config, api_url, "", "", prompt)
+    entries = parse_similar_rerank_result(response_text)
+    if not entries:
+        logger.warning(f"[Rerank] AI 未返回任何有效条目，raw={response_text[:300]}")
+    return entries
