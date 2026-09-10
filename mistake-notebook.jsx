@@ -1242,7 +1242,7 @@ const CSS = `
   transform: translateY(-1px);
 }
 .mnb .similar-item-thumb {
-  width: 84px; min-width: 84px; height: 84px; border-radius: 7px; overflow: hidden;
+  width: 200px; min-width: 200px; height: 150px; border-radius: 7px; overflow: hidden;
   background: var(--grid); border: 1px solid var(--grid);
   display: flex; align-items: center; justify-content: center;
 }
@@ -1295,7 +1295,7 @@ const CSS = `
 .mnb .similar-kind.weak { color: #7b8494; background: #F1F2F5; }
 @media (max-width: 700px) {
   .mnb .similar-item { flex-wrap: wrap; }
-  .mnb .similar-item-thumb { width: 100%; height: 140px; min-width: 0; }
+  .mnb .similar-item-thumb { width: 100%; height: 200px; min-width: 0; }
   .mnb .similar-item-side { border-left: none; padding-left: 0; justify-content: flex-start; }
 }
 `;
@@ -1828,7 +1828,7 @@ export default function App() {
   // 从详情页打开时为该题的 file_path（用题干+知识点查找并排除自身）；从库工具栏打开为 null（手动粘贴文本）
   const [similarSourceFile, setSimilarSourceFile] = useState(null);
   const [similarSmart, setSimilarSmart] = useState(false); // 是否用 AI 智能精排
-  const [similarTopK, setSimilarTopK] = useState(15);
+  const [similarTopK, setSimilarTopK] = useState(5);
   const [similarBusy, setSimilarBusy] = useState(false);
   const [similarError, setSimilarError] = useState(null);
   // { mode, query_text, results }；results 同时用于详情弹窗的相似结果翻页
@@ -2464,6 +2464,10 @@ export default function App() {
     setDetailError(null);
     setDetail(null);
     setPreviewSolutionImage(null);
+    // 从相似列表点开的详情：关闭后回到相似列表（结果仍在），而不是直接回错题库页
+    if (detailSourceRef.current === 'similar' && similarResult && !similarBusy) {
+      setSimilarOpen(true);
+    }
   }
 
   // --- 找相似题 ---
@@ -2478,7 +2482,7 @@ export default function App() {
     setSimilarSourceFile(sourceFile);
     setSimilarText(seed);
     setSimilarSmart(false);
-    setSimilarTopK(15);
+    setSimilarTopK(5);
     setSimilarBusy(false);
     setSimilarError(null);
     setSimilarResult(null);
@@ -2497,7 +2501,7 @@ export default function App() {
   async function runSimilarSearch() {
     setSimilarError(null);
     const smart = !!similarSmart;
-    const topK = Number(similarTopK) || 15;
+    const topK = Number(similarTopK) || 5;
     let payload;
     if (similarSourceFile) {
       payload = { file_path: similarSourceFile, smart, top_k: topK };
@@ -3666,7 +3670,7 @@ export default function App() {
                 <span style={{ color: 'var(--ink-soft)', fontWeight: 500 }}>显示</span>
                 <select className="similar-topk" value={similarTopK}
                   onChange={(e) => setSimilarTopK(Number(e.target.value))} disabled={similarBusy}>
-                  {[10, 15, 20, 30].map((n) => <option key={n} value={n}>{n}</option>)}
+                  {[3, 5, 10].map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
                 <span style={{ color: 'var(--ink-soft)', fontWeight: 500 }}>条</span>
               </label>
