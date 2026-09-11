@@ -504,6 +504,14 @@ const CSS = `
 .mnb .analyze-btn:hover { opacity: 0.85; }
 .mnb .analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* 分析中：tab 上的呼吸小圆点指示器 */
+.mnb .tab-analyzing-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: #f59e0b; margin-left: 5px; vertical-align: 1px;
+  animation: mnb-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mnb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
 .mnb .empty { text-align: center; padding: 50px 20px; color: var(--ink-soft); }
 .mnb .empty svg { opacity: 0.4; margin-bottom: 10px; }
 
@@ -1747,6 +1755,8 @@ export default function App() {
   const [scanDeleteTarget, setScanDeleteTarget] = useState(null);
   const [scanDeleting, setScanDeleting] = useState(false);
   const scanClickTimerRef = useRef(null);
+  // AI 分析请求的取消控制器：「取消」按钮通过它真正中止 fetch，避免旧请求竞态写回 draft
+  const analyzeAbortRef = useRef(null);
 
   // --- Library state ---
   const [allIndexed, setAllIndexed] = useState([]);
@@ -2169,6 +2179,10 @@ export default function App() {
   // --- Analysis (calls server-side AI) ---
   async function startAnalyze(filePath) {
     console.group('[Analysis] start:', filePath);
+    // 若上一个分析仍在飞，先取消它，避免两次分析竞态覆盖 draft
+    if (analyzeAbortRef.current) analyzeAbortRef.current.abort();
+    const controller = new AbortController();
+    analyzeAbortRef.current = controller;
     setAnalyzingFile(filePath);
     setDraft(null);
     setAnalysisError(null);
@@ -2179,7 +2193,8 @@ export default function App() {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: filePath })
+        body: JSON.stringify({ file_path: filePath }),
+        signal: controller.signal
       });
 
       if (!resp.ok) {
@@ -2203,13 +2218,32 @@ export default function App() {
       });
       console.groupEnd();
     } catch (e) {
-      console.error('[Analysis] exception:', e.message, e);
       console.groupEnd();
+      // 主动取消（点了「取消」或切换到其它图片）：静默退出，不写 error/draft
+      if (e.name === 'AbortError') {
+        console.log('[Analysis] 请求已取消');
+        return;
+      }
+      console.error('[Analysis] exception:', e.message, e);
       setAnalysisError(e.message || 'AI analysis failed');
       setDraft({ title: '', summary: '', content: '', tags: [], difficulty: 3 });
     } finally {
+      if (analyzeAbortRef.current === controller) analyzeAbortRef.current = null;
       setAnalyzing(false);
     }
+  }
+
+  // 取消当前分析：abort 在飞的 fetch，并清空扫描页的分析状态
+  function cancelAnalyze() {
+    if (analyzeAbortRef.current) {
+      analyzeAbortRef.current.abort();
+      analyzeAbortRef.current = null;
+    }
+    setAnalyzingFile(null);
+    setDraft(null);
+    setAnalysisError(null);
+    setSaveMsg('');
+    setAnalyzing(false);
   }
 
   function addTag() {
@@ -2867,21 +2901,27 @@ export default function App() {
             <div className="subtitle">目录扫描 · AI 打标签 · 按考点查题</div>
           </div>
           <div className="tabs">
-            <button className={'tab-btn' + (tab === 'scan' ? ' active' : '')} onClick={() => setTab('scan')}>
+            <button className={'tab-btn' + (tab === 'scan' ? ' active' : '')} onClick={() => setTab('scan')}
+              title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，可放心切换其它页面' : undefined}>
               <FolderOpen size={14} style={{ marginRight: 4, verticalAlign: -2 }} />扫描
+              {analyzing && <span className="tab-analyzing-dot" title="AI 分析中" />}
             </button>
-            <button className={'tab-btn' + (tab === 'library' ? ' active' : '')} onClick={() => setTab('library')}>
+            <button className={'tab-btn' + (tab === 'library' ? ' active' : '')} onClick={() => setTab('library')}
+              title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，去错题库编辑不会中断分析' : undefined}>
               <BookOpen size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
               错题库 {totalIndexedCount > 0 ? `(${totalIndexedCount})` : ''}
             </button>
-            <button className={'tab-btn' + (tab === 'focus' ? ' active' : '')} onClick={() => switchToFocus()}>
+            <button className={'tab-btn' + (tab === 'focus' ? ' active' : '')} onClick={() => switchToFocus()}
+              title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <Target size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
               重点练{/* 重点练数量只在当前 tab 显示，但计数在加载后可获取 */}
             </button>
-            <button className={'tab-btn' + (tab === 'timeline' ? ' active' : '')} onClick={() => setTab('timeline')}>
+            <button className={'tab-btn' + (tab === 'timeline' ? ' active' : '')} onClick={() => setTab('timeline')}
+              title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <History size={14} style={{ marginRight: 4, verticalAlign: -2 }} />时间线
             </button>
-            <button className={'tab-btn' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}>
+            <button className={'tab-btn' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}
+              title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <Settings size={14} style={{ marginRight: 4, verticalAlign: -2 }} />配置
             </button>
           </div>
@@ -2961,9 +3001,10 @@ export default function App() {
               ) : (
                 <span style={{ color: 'var(--margin)', fontSize: 13 }}>请先在"配置"页面设置图片目录</span>
               )}
-              <button className="refresh-btn" onClick={doScan} disabled={scanning || !imageDir}>
+              <button className="refresh-btn" onClick={doScan} disabled={scanning || !imageDir || analyzing}
+                title={analyzing ? 'AI 分析进行中，刷新扫描会丢弃当前分析结果，请等待完成或先取消' : undefined}>
                 {scanning ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
-                {scanning ? '扫描中…' : '刷新扫描'}
+                {analyzing && !scanning ? '分析中，暂不可刷新' : scanning ? '扫描中…' : '刷新扫描'}
               </button>
               {scanData && (
                 <span className="scan-stats">
@@ -2985,6 +3026,13 @@ export default function App() {
                       <button className="analyze-btn" onClick={() => startAnalyze(analyzingFile)} disabled={analyzing}>
                         {analyzing ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
                         {analyzing ? 'AI 分析中…' : 'AI 分析知识点'}
+                      </button>
+                    )}
+                    {!draft && analyzing && (
+                      <button className="analyze-btn"
+                        style={{ background: 'var(--paper)', color: 'var(--ink)', marginTop: 8 }}
+                        onClick={cancelAnalyze}>
+                        取消分析
                       </button>
                     )}
                     {analysisError && <div className="error-msg"><AlertCircle size={13} /> {analysisError}</div>}
@@ -3043,8 +3091,8 @@ export default function App() {
                         {saving ? '保存中…' : '保存索引'}
                       </button>
                       <button className="save-btn secondary" style={{ marginLeft: 8 }}
-                        onClick={() => { setAnalyzingFile(null); setDraft(null); setAnalysisError(null); }}>
-                        取消
+                        onClick={cancelAnalyze}>
+                        {analyzing ? '取消分析' : '取消'}
                       </button>
                       {saveMsg && <div className="save-msg">{saveMsg}</div>}
                     </div>
