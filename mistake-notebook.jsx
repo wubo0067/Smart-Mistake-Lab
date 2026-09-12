@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 
 function formatTime(ts) {
@@ -714,6 +714,22 @@ const CSS = `
 .mnb .zoom-tool-btn:hover { background: var(--grid); }
 .mnb .zoom-tool-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .mnb .zoom-tool-btn:disabled:hover { background: none; }
+/* 图片预览翻页箭头（覆盖层两侧） */
+.mnb .zoom-preview-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,0.8); background: rgba(255,255,255,0.14);
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all .15s; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+.mnb .zoom-preview-nav:hover { background: rgba(255,255,255,0.35); }
+.mnb .zoom-preview-nav.left { left: 24px; }
+.mnb .zoom-preview-nav.right { right: 24px; }
+@media (max-width: 860px) {
+  .mnb .zoom-preview-nav { width: 38px; height: 38px; }
+  .mnb .zoom-preview-nav.left { left: 8px; }
+  .mnb .zoom-preview-nav.right { right: 8px; }
+}
 .mnb .zoom-tool-label {
   font-size: 12px; font-weight: 700; color: var(--ink);
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
@@ -1497,7 +1513,15 @@ function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, remind
 // 窗口随图片整体缩放：滚轮/按钮改变图片显示尺寸，预览窗口同步变大变小，
 // 超出屏幕时容器内部出现滚动条；双击切换 适应窗口/100%。
 
-function ZoomableImagePreview({ src, alt, onClose }) {
+function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate }) {
+  // 翻页支持：传入 images（src 数组）+ index + onNavigate 时，可用左右箭头/键盘切换多张图片
+  const navList = Array.isArray(images) && images.length > 0 ? images : [src];
+  const safeIndex = Math.min(Math.max(index, 0), navList.length - 1);
+  const currentSrc = navList[safeIndex];
+  const canNav = navList.length > 1 && typeof onNavigate === 'function';
+  const hasPrev = canNav && safeIndex > 0;
+  const hasNext = canNav && safeIndex < navList.length - 1;
+
   const scrollRef = useRef(null);
   const dialogRef = useRef(null);
   const prevFocusRef = useRef(null);
@@ -1594,6 +1618,25 @@ function ZoomableImagePreview({ src, alt, onClose }) {
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  // 切换图片时重置缩放/位移（layout effect 保证在新图片 load 事件之前执行）
+  useLayoutEffect(() => {
+    setNat(null);
+    setScale(1);
+    scaleRef.current = 1;
+    setOffset({ x: 0, y: 0 });
+  }, [currentSrc]);
+
+  // 键盘左右方向键翻页
+  useEffect(() => {
+    if (!canNav) return;
+    const handler = (e) => {
+      if (e.key === 'ArrowLeft' && hasPrev) { e.preventDefault(); onNavigate(safeIndex - 1); }
+      if (e.key === 'ArrowRight' && hasNext) { e.preventDefault(); onNavigate(safeIndex + 1); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [canNav, hasPrev, hasNext, safeIndex, onNavigate]);
+
   // 滚轮缩放：保持光标下的图像点不动（调整滚动位置补偿）
   useEffect(() => {
     const el = scrollRef.current;
@@ -1689,7 +1732,8 @@ function ZoomableImagePreview({ src, alt, onClose }) {
           title="滚轮缩放 · 双击切换 适应窗口/原始大小"
         >
           <img
-            src={src}
+            key={currentSrc}
+            src={currentSrc}
             alt={alt || '图片预览'}
             draggable={false}
             onLoad={handleImgLoad}
@@ -1717,8 +1761,26 @@ function ZoomableImagePreview({ src, alt, onClose }) {
             disabled={!nat || nearFit} title="适应窗口">
             <Maximize size={14} />
           </button>
+          {canNav && (
+            <>
+              <span className="zoom-tool-sep" />
+              <span className="zoom-tool-label" style={{ minWidth: 'auto' }} title="图片序号">{safeIndex + 1} / {navList.length}</span>
+            </>
+          )}
         </div>
       </div>
+      {hasPrev && (
+        <button className="zoom-preview-nav left" onClick={(e) => { e.stopPropagation(); onNavigate(safeIndex - 1); }}
+          title="上一张 ←">
+          <ChevronLeft size={22} />
+        </button>
+      )}
+      {hasNext && (
+        <button className="zoom-preview-nav right" onClick={(e) => { e.stopPropagation(); onNavigate(safeIndex + 1); }}
+          title="下一张 →">
+          <ChevronRight size={22} />
+        </button>
+      )}
     </div>
   );
 }
@@ -2362,6 +2424,14 @@ export default function App() {
       ? `相似结果 ${detailIndex + 1} / ${detailPaginationSource.length} 条`
       : `第 ${detailIndex + 1} / ${detailPaginationSource.length} 题`)
     : '';
+
+  // 图片预览翻页列表：原题图片 + 全部解答图片，支持左右箭头逐张浏览
+  const previewNavPaths = useMemo(() => {
+    if (!previewSolutionImage) return [];
+    const list = detail ? [detail.file_path, ...solutionImages.map(getSolutionFullPath)] : [];
+    return list.includes(previewSolutionImage) ? list : [previewSolutionImage];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewSolutionImage, detail, solutionImages]);
 
   // Auto-close detail if current problem no longer in filtered
   // （similar 弹窗打开期间不自动关闭详情，避免正在进行的相似查找打断详情浏览）
@@ -3900,12 +3970,15 @@ export default function App() {
         </div>
       )}
 
-      {/* 解答图片预览 */}
+      {/* 解答图片预览（支持左右箭头翻页浏览原题与多张解答图片） */}
       {previewSolutionImage && (
         <ZoomableImagePreview
           src={API.imageUrl(previewSolutionImage)}
-          alt="解答图片预览"
+          alt={detail && previewSolutionImage === detail.file_path ? '原题图片预览' : '解答图片预览'}
           onClose={() => setPreviewSolutionImage(null)}
+          images={previewNavPaths.map((p) => API.imageUrl(p))}
+          index={Math.max(0, previewNavPaths.indexOf(previewSolutionImage))}
+          onNavigate={(i) => { const p = previewNavPaths[i]; if (p) setPreviewSolutionImage(p); }}
         />
       )}
     </div>
