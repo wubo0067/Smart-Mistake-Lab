@@ -2579,8 +2579,8 @@ export default function App() {
   // 从库工具栏打开时传 null（手动粘贴题目文字）
   function openSimilarFinder(sourceFile) {
     let seed = '';
-    // 库工具栏打开时，若搜索框已有 ≥6 字的文字，自动预填到输入框
-    if (!sourceFile && query && query.trim().length >= 6) {
+    // 库工具栏打开时，若搜索框已有 ≥2 字的文字，自动预填到输入框
+    if (!sourceFile && query && query.trim().length >= 2) {
       seed = query;
     }
     setSimilarSourceFile(sourceFile);
@@ -2611,8 +2611,8 @@ export default function App() {
       payload = { file_path: similarSourceFile, smart, top_k: topK };
     } else {
       const text = similarText.trim();
-      if (text.length < 6) {
-        setSimilarError('请输入至少 6 个字的题目内容');
+      if (text.length < 2) {
+        setSimilarError('请输入至少 2 个字的题目内容或片段');
         return;
       }
       payload = { text, smart, top_k: topK };
@@ -3768,7 +3768,7 @@ export default function App() {
                 <label className="field-label">
                   题目文字
                   <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--pencil)', marginLeft: 6 }}>
-                    （至少 6 个字，越完整越准确）
+                    （至少 2 个字，可只输入题目片段，越完整越准确）
                   </span>
                 </label>
                 <textarea rows={4} value={similarText}
@@ -3797,7 +3797,7 @@ export default function App() {
             <div className="modal-actions" style={{ borderTop: 'none', paddingTop: 10, justifyContent: 'flex-end' }}>
               <button className="save-btn" style={{ marginTop: 0 }}
                 onClick={runSimilarSearch}
-                disabled={similarBusy || (!similarSourceFile && similarText.trim().length < 6)}>
+                disabled={similarBusy || (!similarSourceFile && similarText.trim().length < 2)}>
                 {similarBusy ? <Loader2 size={14} className="spin" /> : '🔍'}
                 {similarBusy ? '查找中…' : '查找相似题'}
               </button>

@@ -1,3 +1,14 @@
+'''
+Author: calm.wu wubo0067@hotmail.com
+Date: 2026-07-03 13:55:29
+LastEditors: calm.wu wubo0067@hotmail.com
+LastEditTime: 2026-09-12 13:37:18
+FilePath: server/server.py
+Description: 主服务器入口，负责处理请求和响应。
+
+Copyright (c) 2026 by ${git_name_email}, All Rights Reserved.
+'''
+
 import os
 import json
 import base64
@@ -786,8 +797,9 @@ def update_ai_config(data: dict):
 
 # LLM 精排最多只吃前 15 个本地候选（控制 prompt 规模与耗时）
 _SMART_RERANK_CAP = 15
-# 文本查询的最短长度（汉字/字符）；太短时字符级相似度无区分度
-_MIN_QUERY_TEXT_LEN = 6
+# 文本查询的最短长度（汉字/字符）；允许题目片段查询，靠 containment
+# （查询覆盖率）召回包含该片段的题目；太短（<2）时连 bigram 都无法形成
+_MIN_QUERY_TEXT_LEN = 2
 
 
 @app.post("/api/images/find-similar")

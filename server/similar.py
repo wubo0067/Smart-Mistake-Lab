@@ -113,6 +113,15 @@ LONG_QUERY_BIGRAMS = 8     # 查询 bigram 数 >= 该值时视为“整题查询
 MIN_COMBINED_SCORE = 0.16  # 综合分低于该值的候选直接丢弃
 WEAK_SCORE = 0.30          # 综合分低于该值但未丢弃 → 弱相关
 
+# 片段查询优化（短查询非对称评分 + 子串命中保底）：
+# “一图含多题”的长合集里，短片段即使原样命中，jaccard 也必然被长文档
+# 稀释（交集/并集分母巨大），对称权重会把满分命中压到 5 折。两处修正：
+# 1) 文档明显长于查询时，改用 containment 为主的权重（片段覆盖率）；
+# 2) 查询作为连续子串原样出现在题面（含归一化后）时，综合分给高下限。
+SHORT_VS_DOC_RATIO = 3            # 文档 bigram ≥ 查询的 3 倍 → 视为“明显更长”
+SHORT_QUERY_CONTAINMENT_W = 0.9   # 该场景下 containment 权重（jaccard 占余下 0.1）
+SUBSTRING_COMBINED_FLOOR = 0.85   # 连续子串命中时综合分下限
+
 
 def _doc_features(item: dict) -> dict:
     """为库内一道题提取用于比对的文本特征。content 为空时回退 summary/title。"""
@@ -161,8 +170,16 @@ def _classify_kind(
     norm_score: float,
     combined: float,
     long_query: bool,
+    fragment: bool = False,
 ) -> str:
-    """把一道候选归为 same / variant / similar / weak。"""
+    """把一道候选归为 same / variant / similar / weak。
+
+    fragment=True 表示查询只是候选长题面里的一小段（文档远长于查询）：
+    此时 containment 再高也只能说明“题面包含这段文字”，无法证明是同一道
+    题，因此最多判为“类似”，不判同题 / 变体（由上层展示为相关度百分比）。
+    """
+    if fragment:
+        return "similar" if combined >= WEAK_SCORE else "weak"
     if long_query:
         # 数字归一化后分数明显高于原始分（且本身足够高）→ 差异主要来自
         # 数字/字母命名 → “换数变体”。先于 same 判断：整题照抄但只改了
@@ -221,18 +238,29 @@ def find_similar_problems(
 
         raw_c, raw_j = _set_scores(q_raw_bg, feats["raw_bg"])
         norm_c, norm_j = _set_scores(q_norm_bg, feats["norm_bg"])
-        raw_score = 0.55 * raw_c + 0.45 * raw_j
-        norm_score = 0.55 * norm_c + 0.45 * norm_j
+        # 短片段查询：文档明显长于查询时 jaccard 必然被稀释，
+        # 改用 containment 为主的非对称权重，避免长合集题被误惩罚
+        short_vs_doc = len(feats["raw_bg"]) >= len(q_raw_bg) * SHORT_VS_DOC_RATIO
+        if short_vs_doc:
+            raw_score = SHORT_QUERY_CONTAINMENT_W * raw_c + (1 - SHORT_QUERY_CONTAINMENT_W) * raw_j
+            norm_score = SHORT_QUERY_CONTAINMENT_W * norm_c + (1 - SHORT_QUERY_CONTAINMENT_W) * norm_j
+        else:
+            raw_score = 0.55 * raw_c + 0.45 * raw_j
+            norm_score = 0.55 * norm_c + 0.45 * norm_j
         text_sim = max(raw_score, norm_score)
 
         tag_sim = _tags_iou(query_tags or [], sorted(feats["tags"]))
         subject_bonus = 0.05 if (query_subject and feats["subject"] == query_subject) else 0.0
 
         combined = min(1.0, 0.60 * text_sim + 0.35 * tag_sim + subject_bonus)
+        # 连续子串命中：查询片段原样出现在题面（或数字/字母归一化后出现），
+        # 是“题面包含这段文字”的最强证据 → 综合分保底
+        if q_clean and (q_clean in feats["clean"] or q_norm in feats["norm"]):
+            combined = max(combined, SUBSTRING_COMBINED_FLOOR)
         if combined < MIN_COMBINED_SCORE:
             continue
 
-        kind = _classify_kind(raw_score, norm_score, combined, long_query)
+        kind = _classify_kind(raw_score, norm_score, combined, long_query, fragment=short_vs_doc)
         # 存分数便于排序；文本相似度太低时“纯靠标签”的候选分也不会虚高
         scored.append((combined, kind, item, raw_score, norm_score, tag_sim))
 

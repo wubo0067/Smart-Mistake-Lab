@@ -1,3 +1,14 @@
+'''
+Author: calm.wu wubo0067@hotmail.com
+Date: 2026-08-28 10:35:11
+LastEditors: calm.wu wubo0067@hotmail.com
+LastEditTime: 2026-09-12 13:37:53
+FilePath: server/path_resolver.py
+Description: 路径解析器，用于处理文件路径的解析和验证。
+
+Copyright (c) 2026 by ${git_name_email}, All Rights Reserved.
+'''
+
 import os
 from pathlib import Path
 

@@ -212,5 +212,121 @@ class FindSimilarDbTests(unittest.TestCase):
         self.assertEqual(similar.find_similar_problems("", top_k=5), [])
 
 
+class FragmentQueryTests(unittest.TestCase):
+    """片段查询优化：短查询非对称评分 + 连续子串命中保底。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        db_path = os.path.join(self._tmp.name, "data.db")
+        self._patcher = mock.patch.object(db, "DB_PATH", db_path)
+        self._patcher.start()
+        db.init_db()
+        similar._cache_key = None
+        similar._cache_items = None
+
+    def tearDown(self):
+        self._patcher.stop()
+        self._tmp.cleanup()
+        similar._cache_key = None
+        similar._cache_items = None
+
+    @staticmethod
+    def _norm_path(p: str) -> str:
+        return os.path.normpath(p)
+
+    def _add(self, path, content, tags=(), subject="数学"):
+        db.mark_indexed(
+            path,
+            title=f"题目：{path}",
+            summary=content[:40],
+            content=content,
+            tags=list(tags),
+            subject=subject,
+        )
+
+    def test_fragment_in_long_collection_gets_high_score(self):
+        # 一图含多题的长合集：短片段原样出现 → 子串保底，综合分 ≥ 0.85
+        long_content = (
+            "如图，在正方形 ABCD 中，点 E 是边 BC 的中点，连接 AE 并延长交 DC "
+            "的延长线于点 F。第二题：直角三角形中两直角边分别为 3 和 4，求斜边。"
+            "第三题：若 BM=2DM，求 BG 的长。第四题：已知一次函数图像过两点，求解析式。"
+        ) * 3
+        self._add("数学/collection.jpg", long_content)
+        results = similar.find_similar_problems("求BG的长", top_k=5)
+        hit = next(
+            (r for r in results if r["file_path"] == self._norm_path("数学/collection.jpg")),
+            None,
+        )
+        self.assertIsNotNone(hit, "长合集中的原样片段应被召回")
+        self.assertGreaterEqual(hit["score"], similar.SUBSTRING_COMBINED_FLOOR)
+
+    def test_fragment_across_letter_normalization_gets_floor(self):
+        # 查询与题面字母命名不同（BG→MN），归一化后同为“求v的长” → 仍触发保底
+        long_content = (
+            "如图，在正方形 ABCD 中，点 E 是边 BC 的中点，连接 AE 并延长交 DC "
+            "的延长线于点 F。第二题：直角三角形中两直角边分别为 3 和 4，求斜边。"
+            "第三题：若 BM=2DM，求 MN 的长。第四题：已知一次函数图像过两点，求解析式。"
+        ) * 3
+        self._add("数学/collection2.jpg", long_content)
+        results = similar.find_similar_problems("求BG的长", top_k=5)
+        hit = next(
+            (r for r in results if r["file_path"] == self._norm_path("数学/collection2.jpg")),
+            None,
+        )
+        self.assertIsNotNone(hit, "归一化后命中的片段应被召回")
+        self.assertGreaterEqual(hit["score"], similar.SUBSTRING_COMBINED_FLOOR)
+
+    def test_short_query_asymmetric_weight_beats_symmetric(self):
+        # 短片段完整命中长文档：非对称权重下 containment 主导，
+        # 分数应显著高于旧对称公式的 0.6*(0.55*1+0.45*j) 水平
+        long_content = (
+            "如图，在正方形 ABCD 中，点 E 是边 BC 的中点，连接 AE 并延长交 DC "
+            "的延长线于点 F。第二题：直角三角形中两直角边分别为 3 和 4，求斜边。"
+            "第三题：若 BM=2DM，求 BG 的长。第四题：已知一次函数图像过两点，求解析式。"
+        ) * 3
+        self._add("数学/collection3.jpg", long_content)
+        results = similar.find_similar_problems("求BG的长", top_k=5)
+        hit = next(
+            (r for r in results if r["file_path"] == self._norm_path("数学/collection3.jpg")),
+            None,
+        )
+        self.assertIsNotNone(hit)
+        # 旧公式约 0.33，新逻辑（保底 0.85）应远高于它
+        self.assertGreater(hit["score"], 0.6)
+
+    def test_fragment_never_classified_as_same(self):
+        # 片段完整命中长合集：即使综合分被保底抬高，也只能判“类似”，
+        # 不能判“同题”——题面包含这段文字 ≠ 同一道题
+        long_content = (
+            "如图，在正方形 ABCD 中，点 E 是边 BC 的中点，连接 AE 并延长交 DC "
+            "的延长线于点 F。第二题：直角三角形中两直角边分别为 3 和 4，求斜边。"
+            "第三题：若 BM=2DM，求 BG 的长。第四题：已知一次函数图像过两点，求解析式。"
+        ) * 3
+        self._add("数学/collection4.jpg", long_content)
+        results = similar.find_similar_problems("求BG的长", top_k=5)
+        hit = next(
+            (r for r in results if r["file_path"] == self._norm_path("数学/collection4.jpg")),
+            None,
+        )
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["match_kind"], "similar")
+        self.assertNotEqual(hit["match_kind"], "same")
+
+    def test_unrelated_fragment_not_boosted(self):
+        # 片段没有原样出现 → 不触发保底，分数保持低位
+        self._add(
+            "数学/other.jpg",
+            "质量为 2kg 的物体在水平拉力作用下沿光滑水平面运动，拉力做功 10J，求物体的末速度。" * 4,
+            subject="物理",
+        )
+        results = similar.find_similar_problems("求BG的长", top_k=5)
+        hit = next(
+            (r for r in results if r["file_path"] == self._norm_path("数学/other.jpg")),
+            None,
+        )
+        if hit is not None:
+            self.assertLess(hit["score"], similar.SUBSTRING_COMBINED_FLOOR)
+
+
 if __name__ == "__main__":
     unittest.main()
