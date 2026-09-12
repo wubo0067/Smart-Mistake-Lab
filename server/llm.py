@@ -1,7 +1,13 @@
-""",
-Smart Mistake Lab - LLM 交互模块
-负责 Prompt 管理、AI API 调用、响应解析。
-"""
+'''
+Author: calm.wu wubo0067@hotmail.com
+Date: 2026-07-03 09:00:38
+LastEditors: calm.wu wubo0067@hotmail.com
+LastEditTime: 2026-09-12 17:26:22
+FilePath: server/llm.py
+Description: LLM 交互模块，负责 Prompt 管理、AI API 调用、响应解析。
+
+Copyright (c) 2026 by calm.wu wubo0067@hotmail.com, All Rights Reserved.
+'''
 
 from __future__ import annotations
 

@@ -393,9 +393,11 @@ def update_image(data: dict):
     if isinstance(solution, dict):
         solution = json.dumps(solution, ensure_ascii=False)
 
-    # 从错题库或重点练页面打开并编辑保存时，记录时间线
-    # source 可选值：'library'（错题库）、'focus'（重点练）、'timeline'（时间线）
-    if data.get("source") in ("library", "focus"):
+    # 编辑保存即视为一次练习，记录时间线。
+    # source 可选值：'library'（错题库）、'focus'（重点练）、'timeline'（时间线）、
+    # 'similar'（找相似题结果）。用排除法而非白名单：新增入口（如 similar）
+    # 默认也会记录，避免漏记。
+    if data.get("source") not in ("skip",):
         db.log_solution_edit(file_path, "edit_solution")
 
     db.update_image_meta(

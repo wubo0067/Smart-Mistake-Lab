@@ -1,7 +1,13 @@
-"""
-Smart Mistake Lab - 日志模块
-提供统一的结构化日志记录，支持控制台输出和文件滚动存储。
-"""
+'''
+Author: calm.wu wubo0067@hotmail.com
+Date: 2026-07-03 09:00:05
+LastEditors: calm.wu wubo0067@hotmail.com
+LastEditTime: 2026-09-12 17:24:41
+FilePath: server/log.py
+Description: 日志模块，提供统一的日志记录接口，支持控制台输出和文件滚动存储。
+
+Copyright (c) 2026 by ${git_name_email}, All Rights Reserved.
+'''
 
 import logging
 import os
