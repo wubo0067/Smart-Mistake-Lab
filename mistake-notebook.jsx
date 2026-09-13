@@ -1886,6 +1886,14 @@ export default function App() {
   const detailSourceRef = useRef('library');
   // 详情页来源 Tab（library/focus/timeline/similar）——决定详情弹窗里上下题翻页所用的列表
   const [detailSourceTab, setDetailSourceTab] = useState('library');
+  // AI 重新分析竞态处理：
+  // - detailAnalyzeSeqRef：自增请求序号，用于区分同一题目上的最新请求
+  // - activeDetailPathRef：当前详情弹窗打开的题目 file_path，用于判断结果属于哪道题
+  const detailAnalyzeSeqRef = useRef(0);
+  const activeDetailPathRef = useRef(null);
+  // 后台自动保存（题目已关闭/切换时，AI 结果仍写回原题）的轻量提示
+  const [autoSaveToast, setAutoSaveToast] = useState(null);
+  const autoSaveToastTimerRef = useRef(null);
 
   const [previewSolutionImage, setPreviewSolutionImage] = useState(null);
 
@@ -2437,6 +2445,8 @@ export default function App() {
   // （similar 弹窗打开期间不自动关闭详情，避免正在进行的相似查找打断详情浏览）
   useEffect(() => {
     if (detail && detailIndex === -1 && !similarOpen) {
+      activeDetailPathRef.current = null;
+      detailAnalyzeSeqRef.current += 1;
       setDetail(null);
       setPreviewSolutionImage(null);
     }
@@ -2487,6 +2497,9 @@ export default function App() {
   function openDetail(p, source = 'library') {
     detailSourceRef.current = source;
     setDetailSourceTab(source);
+    // 记录当前打开的题目，并让之前尚未返回的 AI 分析结果作废（防止串题）
+    activeDetailPathRef.current = p.file_path;
+    detailAnalyzeSeqRef.current += 1;
     const sol = (typeof p.solution === 'string' ? JSON.parse(p.solution || '{}') : (p.solution || {}));
     setDetail(p);
     setDetailTagInput('');
@@ -2566,6 +2579,9 @@ export default function App() {
       }
     }
     setDetailError(null);
+    // 关闭详情：让尚未返回的 AI 分析结果作废，避免串到下一道打开的题目
+    activeDetailPathRef.current = null;
+    detailAnalyzeSeqRef.current += 1;
     setDetail(null);
     setPreviewSolutionImage(null);
     // 从相似列表点开的详情：关闭后回到相似列表（结果仍在），而不是直接回错题库页
@@ -2665,6 +2681,8 @@ export default function App() {
     } else if (hasPrev) {
       openDetail(prevProblem, detailSourceRef.current);
     } else {
+      activeDetailPathRef.current = null;
+      detailAnalyzeSeqRef.current += 1;
       setDetail(null);
       setPreviewSolutionImage(null);
     }
@@ -2745,15 +2763,60 @@ export default function App() {
     }
   }
 
+  // 轻量提示：后台自动保存 AI 结果后，短暂提示用户
+  function showAutoSaveToast(text) {
+    setAutoSaveToast(text);
+    if (autoSaveToastTimerRef.current) clearTimeout(autoSaveToastTimerRef.current);
+    autoSaveToastTimerRef.current = setTimeout(() => setAutoSaveToast(null), 5000);
+  }
+
+  // 卸载时清理自动保存提示的定时器
+  useEffect(() => {
+    return () => { if (autoSaveToastTimerRef.current) clearTimeout(autoSaveToastTimerRef.current); };
+  }, []);
+
+  // 合并标签：保留已有，追加 AI 新识别（不覆盖、不重复）
+  function mergeTags(existingTags, incomingTags) {
+    const base = Array.isArray(existingTags) ? existingTags : [];
+    const incoming = Array.isArray(incomingTags) ? incomingTags : [];
+    const seen = new Set(base);
+    return [...base, ...incoming.filter((t) => !seen.has(t))];
+  }
+
   // --- AI 重新分析（详情弹窗） ---
   async function reanalyzeDetail() {
     if (!detail || detailAnalyzing) return;
     const prompt = (detailUserPrompt || '').trim();
     // 上一次 AI 生成的解题思路（若有），让 AI 在既有思路基础上修正/深化
     const prevSummary = (detail.summary || '').trim();
+    // 记录本次请求对应的题目与请求序号。
+    // 结果返回后：
+    //  - 若仍是当前打开的这道题（前台）→ 填充到编辑草稿，等用户点「保存修改」；
+    //  - 若用户已关闭/切到别的题（后台）→ 自动把结果写回「原题 A」的数据库记录并刷新列表。
+    const analyzedPath = detail.file_path;
+    // 快照：后台自动保存时需要保留的原题字段（这些不随 AI 结果变化）
+    const snapshot = {
+      title: (detail.title || '').trim() || '未命名题目',
+      notes: detail.notes || '',
+      mastery: detailMastery || detail.mastery || 'unfamiliar',
+      practice_count: detailPracticeCount ?? detail.practice_count ?? 0,
+      last_practiced_at: detail.last_practiced_at || null,
+      solution: JSON.stringify({
+        text: solutionTextRef.current,
+        images: solutionImagesRef.current,
+      }),
+      existingTags: detail.tags || [],
+      existingSummary: prevSummary,
+      existingContent: (detailContentRef.current || detail.content || ''),
+      existingDifficulty: typeof detail.difficulty === 'number' ? detail.difficulty : 3,
+    };
+    const seq = ++detailAnalyzeSeqRef.current;
     setDetailAnalyzing(true);
     setDetailAnalyzeMsg(null);
     setDetailError(null);
+    // 结果是否仍属于「当前打开的同一道题」——决定走前台草稿填充还是后台自动保存
+    const isForeground = () =>
+      seq === detailAnalyzeSeqRef.current && activeDetailPathRef.current === analyzedPath;
     try {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
@@ -2762,7 +2825,7 @@ export default function App() {
         // user_prompt：用户自定义的解题方向/知识范围提示（可选）
         // previous_summary：上一次 AI 解题思路（可选），作为重新分析的参考基础
         body: JSON.stringify({
-          file_path: detail.file_path,
+          file_path: analyzedPath,
           content: (detailContentRef.current || '').trim() || undefined,
           user_prompt: prompt || undefined,
           previous_summary: prevSummary || undefined
@@ -2773,42 +2836,99 @@ export default function App() {
         throw new Error(errData.detail || `HTTP ${resp.status}`);
       }
       const result = await resp.json();
-      // 题目内容（content）：更新到「题目内容」编辑框中
+
+      // 计算 AI 结果在各字段上的最终值（前台/后台共用）
       const newContent = result.content || '';
+      const mergedTags = mergeTags(snapshot.existingTags, result.tags);
+      const newSummary = result.summary || snapshot.existingSummary;
+      const d = Number(result.difficulty);
+      const newDifficulty = (Number.isInteger(d) && d >= 1 && d <= 5)
+        ? d : snapshot.existingDifficulty;
+
+      // ===== 后台：题目已关闭/切换 → 自动写回原题 A，不丢弃 =====
+      if (!isForeground()) {
+        try {
+          await API.updateImage(
+            analyzedPath,
+            snapshot.title,
+            newSummary,
+            newContent || snapshot.existingContent,
+            mergedTags,
+            snapshot.notes,
+            snapshot.mastery,
+            snapshot.practice_count,
+            snapshot.last_practiced_at,
+            snapshot.solution,
+            newDifficulty,
+            'skip', // AI 自动回填不算用户练习，跳过时间线记录
+          );
+          // 同步刷新各列表中的该题，保证下次打开/切页看到最新结果
+          const patch = {
+            summary: newSummary,
+            content: newContent || snapshot.existingContent,
+            tags: mergedTags,
+            difficulty: newDifficulty,
+          };
+          setAllIndexed((prev) => prev.map((p) => (p.file_path === analyzedPath ? { ...p, ...patch } : p)));
+          setFocusItems((prev) => prev.map((p) => (p.file_path === analyzedPath ? { ...p, ...patch } : p)));
+          setTimelineDays((prev) => prev.map((day) => ({
+            ...day,
+            items: day.items.map((p) => (p.file_path === analyzedPath ? { ...p, ...patch } : p)),
+          })));
+          // 若该题在等待期间又被重新打开（序号已变化），同步刷新弹窗草稿，避免展示旧数据
+          setDetail((prev) => (prev && prev.file_path === analyzedPath ? { ...prev, ...patch } : prev));
+          if (activeDetailPathRef.current === analyzedPath) {
+            const finalContent = newContent || snapshot.existingContent;
+            setDetailContent(finalContent);
+            detailContentRef.current = finalContent;
+          }
+          showAutoSaveToast('✅ AI 分析已完成，结果已自动保存到对应错题');
+        } catch (e) {
+          console.error('[ReAnalyze] background save failed:', e);
+          showAutoSaveToast('⚠️ AI 分析完成，但自动保存失败，请重新打开该题再试');
+        }
+        return;
+      }
+
+      // ===== 前台：题目仍是当前打开的这道题 → 填充草稿，等用户保存 =====
+      // 题目内容（content）：更新到「题目内容」编辑框中
       if (newContent) {
         setDetailContent(newContent);
         detailContentRef.current = newContent;
       }
       // 合并标签：保留已有标签，仅把 AI 新识别出的标签追加进去（不覆盖、不重复）
       setDetail((prev) => {
-        const existingTags = prev.tags || [];
-        const incomingTags = Array.isArray(result.tags) ? result.tags : [];
-        const seen = new Set(existingTags);
-        const newTags = incomingTags.filter((t) => !seen.has(t));
+        // 双重校验：prev 必须是发起分析的那道题，否则不动
+        if (!prev || prev.file_path !== analyzedPath) return prev;
         const updates = {
-          tags: [...existingTags, ...newTags],
+          // 以 prev 的最新标签为基底合并，避免并发请求下覆盖掉刚写入的结果
+          tags: mergeTags(prev.tags, result.tags),
           // 解题思路（summary）直接覆盖更新
-          summary: result.summary || prev.summary,
+          summary: newSummary,
           // 题目内容更新为 AI 提取的完整内容
           content: newContent || prev.content,
+          difficulty: newDifficulty,
         };
-        // AI 重新判断的难度（1-5 星），无效则保持原值
-        const d = Number(result.difficulty);
-        if (Number.isInteger(d) && d >= 1 && d <= 5) updates.difficulty = d;
         return { ...prev, ...updates };
       });
       setDetailDirty(true);
       const added = (Array.isArray(result.tags) ? result.tags : [])
-        .filter((t) => !((detail.tags || []).includes(t)));
+        .filter((t) => !(snapshot.existingTags.includes(t)));
       const promptSuffix = prompt ? '（已按你的提示方向重新分析）' : '';
       setDetailAnalyzeMsg((added.length > 0
         ? `AI 重新分析完成：新增 ${added.length} 个标签，解题思路与题目内容已更新。`
         : 'AI 重新分析完成：解题思路与题目内容已更新，无新增标签。') + `请点击「保存修改」生效${promptSuffix}。`);
     } catch (e) {
       console.error('[ReAnalyze] failed:', e);
-      setDetailError('AI 重新分析失败：' + (e.message || '未知错误'));
+      // 题目已关闭/切换时，错误也走后台提示；前台则显示在弹窗内
+      if (isForeground()) {
+        setDetailError('AI 重新分析失败：' + (e.message || '未知错误'));
+      } else {
+        showAutoSaveToast('⚠️ AI 重新分析失败：' + (e.message || '未知错误'));
+      }
     } finally {
-      setDetailAnalyzing(false);
+      // 仅当本次仍是最新请求时才清除「分析中」状态，避免误清新题目的 spinner
+      if (seq === detailAnalyzeSeqRef.current) setDetailAnalyzing(false);
     }
   }
 
@@ -3980,6 +4100,21 @@ export default function App() {
           index={Math.max(0, previewNavPaths.indexOf(previewSolutionImage))}
           onNavigate={(i) => { const p = previewNavPaths[i]; if (p) setPreviewSolutionImage(p); }}
         />
+      )}
+
+      {/* AI 结果后台自动保存的轻量提示（toast） */}
+      {autoSaveToast && (
+        <div
+          onClick={() => setAutoSaveToast(null)}
+          style={{
+            position: 'fixed', right: 24, bottom: 24, zIndex: 10000,
+            maxWidth: 360, padding: '12px 16px', borderRadius: 10,
+            background: 'rgba(17, 24, 39, 0.94)', color: '#fff',
+            fontSize: 13, lineHeight: 1.6, boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
+            cursor: 'pointer',
+          }}>
+          {autoSaveToast}
+        </div>
       )}
     </div>
   );
