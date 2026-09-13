@@ -1043,8 +1043,14 @@ def build_analyze_request(
     image_data_uri: str,
     image_base64: str,
     prompt: str = "",
+    include_image: bool = True,
 ) -> dict:
-    """构建 AI 分析请求，返回 {headers, body}"""
+    """构建 AI 分析请求，返回 {headers, body}
+
+    include_image=False 时构造不含图片的纯文本请求，仅用于不支持图片输入的端点降级重试。
+    注意：不要根据 API 域名（如 deepseek.com）擅自把图片降级成 base64 文本，
+    那样模型拿到的是文字而不是图像，只会回复「无法识别」。
+    """
     if not prompt:
         prompt = build_analysis_prompt()
     # 输出 prompt
@@ -1052,7 +1058,7 @@ def build_analyze_request(
 
     if is_anthropic_endpoint(api_url):
         content_blocks: list[dict[str, Any]] = []
-        if image_base64:
+        if include_image and image_base64:
             content_blocks.append(
                 {
                     "type": "image",
@@ -1097,7 +1103,9 @@ def build_analyze_request(
                     {
                         "role": "user",
                         "content": prompt,
-                        "images": [image_base64] if image_base64 else [],
+                        "images": [image_base64]
+                        if (include_image and image_base64)
+                        else [],
                     }
                 ],
             },
@@ -1109,27 +1117,7 @@ def build_analyze_request(
 
     content_blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
-    if is_deepseek_endpoint(api_url):
-        # DeepSeek 当前兼容接口不接受 image_url，这里回退为纯文本消息以避免请求体校验失败。
-        if image_data_uri:
-            content_blocks.append(
-                {"type": "text", "text": f"图片数据（data URI）：\n{image_data_uri}"}
-            )
-        return {
-            "headers": headers,
-            "body": {
-                "model": config.model,
-                "max_tokens": config.max_tokens,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": content_blocks,
-                    }
-                ],
-            },
-        }
-
-    if image_data_uri:
+    if include_image and image_data_uri:
         content_blocks.append(
             {"type": "image_url", "image_url": {"url": image_data_uri}}
         )
@@ -1276,9 +1264,54 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
     return ""
 
 
+IMAGE_UNSUPPORTED_HINT = (
+    "当前 AI 服务不接受图片输入（image_url），无法完成图片题目提取。"
+    "请把「图片题目提取」对应的模型（IMAGE_ANALYSIS_AI_MODEL）换成支持视觉输入的模型"
+    "（例如 qwen 视觉模型、Ollama 视觉模型），纯文本模型无法读取图片内容。"
+)
+
+# 模型声称「看不到图片」时的典型措辞，用于识别提取步骤的无效结果
+_IMAGE_BLIND_MARKERS = (
+    "data uri",
+    "base64",
+    "无法解码",
+    "无法将该",
+    "无法可靠识别",
+    "无法查看图片",
+    "无法读取图片",
+    "看不到图片",
+    "无法识别图中",
+    "重新上传清晰图片",
+)
+
+
+def is_image_unsupported_error(detail: str) -> bool:
+    """判断报错信息是否表示端点/模型不接受图片输入。"""
+    lowered = detail.lower()
+    return (
+        "unknown variant `image_url`" in lowered
+        or "expected `text`" in lowered
+        or "image_url" in lowered
+        or "image input" in lowered
+        or "does not support image" in lowered
+    )
+
+
+def looks_like_image_blind_response(text: str) -> bool:
+    """判断图片提取结果是否为「模型看不到图片」的推诿回答。
+
+    文本模型收到 base64 文本时会礼貌地表示无法解码图片，这类回答会被误当成题目内容
+    传给后续解题分析，必须提前拦下来。
+    """
+    if not text or not text.strip():
+        return True
+    lowered = text.lower()
+    return any(marker.lower() in lowered for marker in _IMAGE_BLIND_MARKERS)
+
+
 def format_ai_error(detail: str) -> str:
-    if "unknown variant `image_url`" in detail or "expected `text`" in detail.lower():
-        return "当前 AI 服务拒绝了图片消息格式（image_url）。该服务的兼容接口没有接受本应用发送的图片输入格式。"
+    if is_image_unsupported_error(detail):
+        return IMAGE_UNSUPPORTED_HINT
     return f"AI API error: {detail}"
 
 
@@ -1410,6 +1443,8 @@ async def _call_ai(
 ) -> str:
     """构建请求并调用 AI，返回响应文本"""
     request = build_analyze_request(config, api_url, data_uri, image_base64, prompt)
+    # 本次请求是否真的带了图片（决定报错时是否可以提示「模型不支持图片」）
+    image_included = bool(data_uri or image_base64)
 
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(config.timeout), trust_env=False
@@ -1434,6 +1469,9 @@ async def _call_ai(
             text_snippet = re.sub(r"<[^>]+>", "", resp.text).strip()[:200]
             if text_snippet:
                 err_detail = f"HTTP {resp.status_code}: {text_snippet}"
+        if image_included and is_image_unsupported_error(err_detail):
+            logger.error(f"[LLM] AI 服务不接受图片输入（image_url）：{err_detail}")
+            raise RuntimeError(IMAGE_UNSUPPORTED_HINT)
         logger.error(f"[LLM] AI 调用失败：{err_detail}")
         raise RuntimeError(format_ai_error(err_detail))
 
@@ -1489,7 +1527,17 @@ async def extract_problem_content(
     response_text = await _call_ai(
         config, api_url, data_uri, image_base64, PROBLEM_EXTRACTION_PROMPT
     )
-    return parse_extraction_result(response_text)
+    content = parse_extraction_result(response_text)
+    if looks_like_image_blind_response(content):
+        logger.error(
+            f"[LLM] 图片题目提取失败：模型未真正读取图片（model={config.model}），"
+            f"返回内容：{content[:200]}"
+        )
+        raise RuntimeError(
+            f"图片题目提取失败：模型「{config.model}」没有真正读取到图片内容。"
+            "请确认 IMAGE_ANALYSIS_AI_MODEL 使用的是支持视觉输入的模型。"
+        )
+    return content
 
 
 async def analyze_image(
