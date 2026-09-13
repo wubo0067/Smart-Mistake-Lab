@@ -1192,15 +1192,17 @@ def _extract_json_from_tail(text: str) -> str:
 
 
 def extract_usage_from_response(data: dict, api_url: str) -> dict:
-    """从 AI 响应中提取 token 用量，归一化为 {prompt, completion, total}。
+    """从 AI 响应中提取 token 用量，归一化为 {prompt, completion, total, cached}。
 
     兼容三种端点：
-    - OpenAI 兼容：usage.prompt_tokens / completion_tokens / total_tokens
-    - Ollama /api/chat：prompt_eval_count / eval_count
-    - Anthropic：usage.input_tokens / output_tokens
+    - OpenAI 兼容：usage.prompt_tokens / completion_tokens / total_tokens，
+      cache 命中在 usage.prompt_tokens_details.cached_tokens（DeepSeek/OpenAI 均支持）
+    - Ollama /api/chat：prompt_eval_count / eval_count（不上报 cache 命中，记 0）
+    - Anthropic：usage.input_tokens / output_tokens，
+      cache 命中在 usage.cache_read_input_tokens
     """
     if not isinstance(data, dict):
-        return {"prompt": 0, "completion": 0, "total": 0}
+        return {"prompt": 0, "completion": 0, "total": 0, "cached": 0}
 
     def _int(value) -> int:
         try:
@@ -1211,7 +1213,12 @@ def extract_usage_from_response(data: dict, api_url: str) -> dict:
     if is_ollama_chat_endpoint(api_url):
         prompt = _int(data.get("prompt_eval_count"))
         completion = _int(data.get("eval_count"))
-        return {"prompt": prompt, "completion": completion, "total": prompt + completion}
+        return {
+            "prompt": prompt,
+            "completion": completion,
+            "total": prompt + completion,
+            "cached": 0,
+        }
 
     usage = data.get("usage") or {}
     if not isinstance(usage, dict):
@@ -1219,7 +1226,12 @@ def extract_usage_from_response(data: dict, api_url: str) -> dict:
     prompt = _int(usage.get("prompt_tokens") or usage.get("input_tokens"))
     completion = _int(usage.get("completion_tokens") or usage.get("output_tokens"))
     total = _int(usage.get("total_tokens")) or (prompt + completion)
-    return {"prompt": prompt, "completion": completion, "total": total}
+    details = usage.get("prompt_tokens_details")
+    cached = 0
+    if isinstance(details, dict):
+        cached = _int(details.get("cached_tokens"))
+    cached = cached or _int(usage.get("cache_read_input_tokens"))
+    return {"prompt": prompt, "completion": completion, "total": total, "cached": cached}
 
 
 def _record_token_usage(config: AiConfig, data: dict, api_url: str) -> None:
@@ -1236,10 +1248,12 @@ def _record_token_usage(config: AiConfig, data: dict, api_url: str) -> None:
             usage["prompt"],
             usage["completion"],
             usage["total"],
+            usage["cached"],
         )
         logger.info(
             f"[LLM] Token 用量（{config.category}）：prompt={usage['prompt']}, "
             f"completion={usage['completion']}, total={usage['total']}"
+            + (f", cached={usage['cached']}" if usage["cached"] else "")
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[LLM] Token 用量记录失败（不影响分析）：{exc}")

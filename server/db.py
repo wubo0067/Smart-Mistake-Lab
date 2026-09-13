@@ -145,9 +145,17 @@ def init_db():
             prompt_tokens INTEGER DEFAULT 0,
             completion_tokens INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,
+            cached_tokens INTEGER DEFAULT 0,
             created_at TIMESTAMP
         )
     """)
+    # 旧库补列：cached_tokens（cache 命中的输入 token 数）
+    try:
+        conn.execute(
+            "ALTER TABLE ai_token_usage ADD COLUMN cached_tokens INTEGER DEFAULT 0"
+        )
+    except sqlite3.OperationalError:
+        pass
     try:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ai_token_usage_cat_date ON ai_token_usage(category, created_at)"
@@ -161,9 +169,16 @@ def init_db():
             prompt_tokens INTEGER DEFAULT 0,
             completion_tokens INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,
+            cached_tokens INTEGER DEFAULT 0,
             calls INTEGER DEFAULT 0
         )
     """)
+    try:
+        conn.execute(
+            "ALTER TABLE ai_token_total ADD COLUMN cached_tokens INTEGER DEFAULT 0"
+        )
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -849,17 +864,22 @@ def record_token_usage(
     prompt_tokens: int,
     completion_tokens: int,
     total_tokens: int,
+    cached_tokens: int = 0,
 ) -> None:
     """记录一次 AI 调用的 token 消耗。
 
     - 明细写入 ai_token_usage（仅保留当月，写入时清理非当月数据）
     - 累计写入 ai_token_total（历史总量，永久保留）
+    - cached_tokens：cache 命中的输入 token 数（DeepSeek/OpenAI 的
+      prompt_tokens_details.cached_tokens，或 Anthropic 的 cache_read_input_tokens；
+      Ollama 不上报，记 0）
     """
     if category not in TOKEN_CATEGORIES:
         category = "problem_ai"
     prompt_tokens = int(prompt_tokens or 0)
     completion_tokens = int(completion_tokens or 0)
     total_tokens = int(total_tokens or 0)
+    cached_tokens = max(int(cached_tokens or 0), 0)
     if total_tokens <= 0:
         total_tokens = prompt_tokens + completion_tokens
     if total_tokens <= 0:
@@ -871,23 +891,32 @@ def record_token_usage(
     try:
         conn.execute(
             """INSERT INTO ai_token_usage
-               (category, model, prompt_tokens, completion_tokens, total_tokens, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (category, model or "", prompt_tokens, completion_tokens, total_tokens, now),
+               (category, model, prompt_tokens, completion_tokens, total_tokens, cached_tokens, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                category,
+                model or "",
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                cached_tokens,
+                now,
+            ),
         )
         conn.execute(
             "DELETE FROM ai_token_usage WHERE substr(created_at, 1, 7) != ?", (month,)
         )
         conn.execute(
             """INSERT INTO ai_token_total
-               (category, prompt_tokens, completion_tokens, total_tokens, calls)
-               VALUES (?, ?, ?, ?, 1)
+               (category, prompt_tokens, completion_tokens, total_tokens, cached_tokens, calls)
+               VALUES (?, ?, ?, ?, ?, 1)
                ON CONFLICT(category) DO UPDATE SET
                    prompt_tokens = prompt_tokens + excluded.prompt_tokens,
                    completion_tokens = completion_tokens + excluded.completion_tokens,
                    total_tokens = total_tokens + excluded.total_tokens,
+                   cached_tokens = cached_tokens + excluded.cached_tokens,
                    calls = calls + 1""",
-            (category, prompt_tokens, completion_tokens, total_tokens),
+            (category, prompt_tokens, completion_tokens, total_tokens, cached_tokens),
         )
         conn.commit()
     finally:
@@ -895,7 +924,7 @@ def record_token_usage(
 
 
 def _empty_totals() -> dict:
-    return {"prompt": 0, "completion": 0, "total": 0, "calls": 0}
+    return {"prompt": 0, "completion": 0, "total": 0, "cached": 0, "calls": 0}
 
 
 def get_token_stats() -> dict:
@@ -909,6 +938,7 @@ def get_token_stats() -> dict:
                       SUM(prompt_tokens) AS prompt_tokens,
                       SUM(completion_tokens) AS completion_tokens,
                       SUM(total_tokens) AS total_tokens,
+                      SUM(cached_tokens) AS cached_tokens,
                       COUNT(*) AS calls
                FROM ai_token_usage
                WHERE substr(created_at, 1, 7) = ?
@@ -921,6 +951,7 @@ def get_token_stats() -> dict:
                       SUM(prompt_tokens) AS prompt_tokens,
                       SUM(completion_tokens) AS completion_tokens,
                       SUM(total_tokens) AS total_tokens,
+                      SUM(cached_tokens) AS cached_tokens,
                       COUNT(*) AS calls
                FROM ai_token_usage
                WHERE substr(created_at, 1, 7) = ?
@@ -939,6 +970,7 @@ def get_token_stats() -> dict:
             "prompt": row["prompt_tokens"] or 0,
             "completion": row["completion_tokens"] or 0,
             "total": row["total_tokens"] or 0,
+            "cached": (row["cached_tokens"] or 0) if "cached_tokens" in row.keys() else 0,
             "calls": row["calls"] or 0,
         }
 
@@ -951,6 +983,7 @@ def get_token_stats() -> dict:
             "prompt": row["prompt_tokens"] or 0,
             "completion": row["completion_tokens"] or 0,
             "total": row["total_tokens"] or 0,
+            "cached": row["cached_tokens"] or 0,
             "calls": row["calls"] or 0,
         }
 
@@ -963,6 +996,7 @@ def get_token_stats() -> dict:
             "prompt": row["prompt_tokens"] or 0,
             "completion": row["completion_tokens"] or 0,
             "total": row["total_tokens"] or 0,
+            "cached": row["cached_tokens"] or 0,
             "calls": row["calls"] or 0,
         }
 
@@ -979,7 +1013,7 @@ def get_token_stats() -> dict:
     grand_history = _empty_totals()
     grand_month = _empty_totals()
     for cat in TOKEN_CATEGORIES:
-        for key in ("prompt", "completion", "total", "calls"):
+        for key in ("prompt", "completion", "total", "cached", "calls"):
             grand_history[key] += history[cat][key]
             grand_month[key] += month_totals[cat][key]
 

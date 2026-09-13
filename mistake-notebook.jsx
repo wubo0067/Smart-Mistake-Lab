@@ -52,7 +52,7 @@ function TokenDailyChart({ daily }) {
           const dayTotal = TOKEN_CATEGORIES.reduce((s, c) => s + (d[c.key]?.total || 0), 0);
           return (
             <div key={d.date} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 22 }}
-              title={`${d.date}　总计 ${dayTotal.toLocaleString()}` + TOKEN_CATEGORIES.map(c => `　${c.label} ${(d[c.key]?.total || 0).toLocaleString()}`).join('')}>
+              title={`${d.date}　总计 ${dayTotal.toLocaleString()}` + TOKEN_CATEGORIES.map(c => `　${c.label} ${(d[c.key]?.total || 0).toLocaleString()}（缓存命中 ${(d[c.key]?.cached || 0).toLocaleString()}）`).join('')}>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 90 }}>
                 {TOKEN_CATEGORIES.map((c) => {
                   const v = d[c.key]?.total || 0;
@@ -3223,64 +3223,50 @@ export default function App() {
         {tab === 'config' && (
           <div className="panel">
             <div className="config-box">
-              <h2 className="config-title">图片目录</h2>
-              <p className="config-hint">
-                设置存放错题图片的本地文件夹路径。程序将扫描该目录下的所有图片文件（支持 jpg / png / gif / webp / bmp）。
-              </p>
-              <div className="field">
-                <label className="field-label">目录路径</label>
+              <h2 className="config-title">基础配置</h2>
+              <div className="field" style={{ marginBottom: 14 }}>
+                <label className="field-label">图片目录路径</label>
                 <input type="text" value={dirInput}
                   onChange={(e) => setDirInput(e.target.value)}
                   placeholder="例如：C:\Users\me\Pictures\错题" />
-              </div>
-            </div>
-
-            <div className="config-box" style={{ marginTop: 20 }}>
-              <h2 className="config-title">重点练督促</h2>
-              <p className="config-hint">
-                设置重点练题目超时阈值。超过该时长未练习的题目将触发督促提醒，并用红色边框高亮。
-              </p>
-              <div className="field">
-                <label className="field-label">超时阈值（小时）</label>
-                <input type="number" value={focusTimeoutInput}
-                  min={1} max={720}
-                  onChange={(e) => setFocusTimeoutInput(e.target.value)}
-                  placeholder="默认 48（即 2 天）" />
-                <span style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4, display: 'block' }}>
-                  当前值：{focusTimeoutHours} 小时 = {Math.round(focusTimeoutHours / 24 * 10) / 10} 天
+                <span style={{ fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 3, display: 'block' }}>
+                  程序将扫描该目录下所有图片（jpg / png / gif / webp / bmp）
                 </span>
               </div>
-            </div>
-
-            <div className="config-box" style={{ marginTop: 20 }}>
-              <h2 className="config-title">重点练数量</h2>
-              <p className="config-hint">
-                设置每个学科最多可同时标记的重点练题目数。
-              </p>
-              <div className="field">
-                <label className="field-label">每学科上限</label>
-                <input type="number" value={focusMaxPerSubject}
-                  min={1} max={50}
-                  onChange={(e) => setFocusMaxPerSubject(Number(e.target.value) || 10)}
-                  placeholder="默认 10" />
-                <span style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4, display: 'block' }}>
-                  当前值：{focusMaxPerSubject} 道/学科
-                </span>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                <div className="field" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+                  <label className="field-label">重点练超时阈值（小时）</label>
+                  <input type="number" value={focusTimeoutInput}
+                    min={1} max={720}
+                    onChange={(e) => setFocusTimeoutInput(e.target.value)}
+                    placeholder="默认 48（即 2 天）" />
+                  <span style={{ fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 3, display: 'block' }}>
+                    当前：{focusTimeoutHours} 小时 ≈ {Math.round(focusTimeoutHours / 24 * 10) / 10} 天，超时未练将触发督促提醒
+                  </span>
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 200, marginBottom: 0 }}>
+                  <label className="field-label">重点练每学科上限</label>
+                  <input type="number" value={focusMaxPerSubject}
+                    min={1} max={50}
+                    onChange={(e) => setFocusMaxPerSubject(Number(e.target.value) || 10)}
+                    placeholder="默认 10" />
+                  <span style={{ fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 3, display: 'block' }}>
+                    当前：{focusMaxPerSubject} 道/学科
+                  </span>
+                </div>
               </div>
-            </div>
-
-            <div className="config-box" style={{ marginTop: 8 }}>
-              <button className="save-btn" style={{ marginTop: 0 }} onClick={saveImageDir} disabled={dirSaving}>
-                {dirSaving ? '保存中…' : '保存配置'}
-              </button>
-              {dirMsg && <div className={'save-msg' + (dirMsg.includes('失败') ? ' error' : '')}>{dirMsg}</div>}
-            </div>
-
-            {dirMsg && dirMsg.includes('成功') && (
-              <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4, paddingLeft: 4 }}>
-                💡 提示：设置每学科重点练上限后，需切换一次「重点练」标签页即可生效。
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+                <button className="save-btn" style={{ marginTop: 0 }} onClick={saveImageDir} disabled={dirSaving}>
+                  {dirSaving ? '保存中…' : '保存配置'}
+                </button>
+                {dirMsg && <div className={'save-msg' + (dirMsg.includes('失败') ? ' error' : '')} style={{ marginTop: 0 }}>{dirMsg}</div>}
               </div>
-            )}
+              {dirMsg && dirMsg.includes('成功') && (
+                <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 6 }}>
+                  💡 提示：设置每学科重点练上限后，需切换一次「重点练」标签页即可生效。
+                </div>
+              )}
+            </div>
 
             {/* ============ AI TOKEN 统计 ============ */}
             <div className="config-box" style={{ marginTop: 20 }}>
@@ -3292,7 +3278,7 @@ export default function App() {
                 </button>
               </div>
               <p className="config-hint">
-                按「图片题目提取」与「解题分析」两类分别统计 token 消耗。历史总量永久累计；每日明细仅保留当前月（{tokenStats?.month || '—'}）。
+                按「图片题目提取」与「解题分析」两类分别统计 token 消耗。历史总量永久累计；每日明细仅保留当前月（{tokenStats?.month || '—'}）。缓存命中来自 API 返回的 cached_tokens（Ollama 端点不上报，恒为 0）。
               </p>
 
               {tokenStatsError && (
@@ -3304,20 +3290,25 @@ export default function App() {
                   {/* 顶部合计 */}
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
                     <TokenStatCard label="历史总消耗" value={tokenStats.grand.history.total}
-                      sub={`${(tokenStats.grand.history.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.history.prompt)} / 输出 ${fmtTokens(tokenStats.grand.history.completion)}`} />
+                      sub={`${(tokenStats.grand.history.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.history.prompt)} / 输出 ${fmtTokens(tokenStats.grand.history.completion)} · 缓存命中 ${fmtTokens(tokenStats.grand.history.cached)}`} />
                     <TokenStatCard label={`本月合计（${tokenStats.month}）`} value={tokenStats.grand.month.total}
-                      sub={`${(tokenStats.grand.month.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.month.prompt)} / 输出 ${fmtTokens(tokenStats.grand.month.completion)}`} />
+                      sub={`${(tokenStats.grand.month.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.month.prompt)} / 输出 ${fmtTokens(tokenStats.grand.month.completion)} · 缓存命中 ${fmtTokens(tokenStats.grand.month.cached)}`} />
                   </div>
 
                   {/* 分类卡片 */}
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-                    {TOKEN_CATEGORIES.map((cat) => (
-                      <TokenStatCard key={cat.key}
-                        label={cat.label}
-                        value={tokenStats.categories[cat.key]?.history?.total || 0}
-                        valueColor={cat.color}
-                        sub={`本月 ${fmtTokens(tokenStats.categories[cat.key]?.month?.total || 0)} · 本月 ${(tokenStats.categories[cat.key]?.month?.calls || 0).toLocaleString()} 次`} />
-                    ))}
+                    {TOKEN_CATEGORIES.map((cat) => {
+                      const h = tokenStats.categories[cat.key]?.history || {};
+                      const m = tokenStats.categories[cat.key]?.month || {};
+                      const hitRate = h.prompt ? Math.round((h.cached || 0) / h.prompt * 100) : 0;
+                      return (
+                        <TokenStatCard key={cat.key}
+                          label={cat.label}
+                          value={h.total || 0}
+                          valueColor={cat.color}
+                          sub={`本月 ${fmtTokens(m.total || 0)} · 本月 ${(m.calls || 0).toLocaleString()} 次 · 历史缓存命中 ${fmtTokens(h.cached || 0)}（${hitRate}%）`} />
+                      );
+                    })}
                   </div>
 
                   {/* 当月每日消耗柱状图 */}
