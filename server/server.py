@@ -48,7 +48,8 @@ def _generate_solution_filename(original_path: str, index: int, ext: str) -> str
 async def lifespan(app: FastAPI):
     """应用生命周期管理（替代已弃用的 on_event）"""
     logger.info("Smart Mistake Lab Server 初始化本地数据库...")
-    db.init_db()
+    db.init_students_db()
+    db.init_db(db.DB_PATH)  # 默认学生库
     image_dir = db.get_config_value("image_dir") or ""
     if image_dir:
         migrated = db.migrate_existing_paths_to_relative(image_dir)
@@ -76,6 +77,50 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class StudentContextMiddleware:
+    """纯 ASGI 中间件：按请求头 X-Student-Id 切换当前学生库。
+
+    用纯 ASGI 而非 BaseHTTPMiddleware，确保 ContextVar 能传播到同步端点
+    （FastAPI 会把 def 端点放到线程池执行，contextvars 会被复制到工作线程）。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        raw = None
+        for key, value in scope.get("headers", []):
+            if key.decode("latin-1").lower() == "x-student-id":
+                raw = value.decode("latin-1")
+                break
+        sid = None
+        if raw:
+            try:
+                sid = int(raw)
+            except ValueError:
+                sid = None
+        # 兜底：<img src> 等无法带请求头的场景，用 ?sid= 查询参数传递
+        if sid is None:
+            qs = scope.get("query_string", b"").decode("latin-1")
+            for part in qs.split("&"):
+                if part.startswith("sid="):
+                    try:
+                        sid = int(part[4:])
+                    except ValueError:
+                        sid = None
+                    break
+        token = db.set_current_db(db.resolve_student_db(sid))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            db.reset_current_db(token)
+
+
+app.add_middleware(StudentContextMiddleware)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
@@ -140,6 +185,52 @@ def health():
 # --- Config ---
 
 
+@app.get("/api/students")
+def list_students():
+    """所有学生列表 + 当前学生 id（依据最近一次请求头解析）。"""
+    students = db.list_students()
+    current = db.get_current_db_path()
+    current_id = None
+    for s in students:
+        if os.path.join(db.DATA_DIR, s["db_file"]) == current:
+            current_id = s["id"]
+            break
+    if current_id is None and students:
+        current_id = students[0]["id"]
+    return {"students": students, "current_id": current_id}
+
+
+@app.post("/api/students")
+def create_student(data: dict):
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="学生名不能为空")
+    try:
+        student = db.create_student(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"新建学生：{name}（库 {student['db_file']}）")
+    return student
+
+
+@app.put("/api/students/{student_id}")
+def rename_student(student_id: int, data: dict):
+    try:
+        return db.rename_student(student_id, (data.get("name") or "").strip())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/students/{student_id}")
+def delete_student(student_id: int):
+    try:
+        db.delete_student(student_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"删除学生 id={student_id}")
+    return {"ok": True}
+
+
 @app.get("/api/config")
 def get_config():
     return {
@@ -150,8 +241,12 @@ def get_config():
 
 
 @app.get("/api/token-stats")
-def token_stats():
-    """AI token 消耗统计：历史总量 + 当月每日消耗（仅保留当月明细）"""
+def token_stats(scope: str = Query("student", description="student=当前学生, all=全家合计")):
+    """AI token 消耗统计：历史总量 + 当月每日消耗（仅保留当月明细）。
+
+    scope=all 时返回全家合计 + 各学生分项。"""
+    if scope == "all":
+        return db.get_family_token_stats()
     return db.get_token_stats()
 
 

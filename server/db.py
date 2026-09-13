@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import contextvars
 from log import logger
 from datetime import datetime
 from path_resolver import to_db_image_path
@@ -11,19 +12,196 @@ def _now() -> str:
     return datetime.now().isoformat(sep=" ", timespec="seconds")
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
+# 数据目录：所有学生库与注册表都放在这里
+DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+# 默认（第一个）学生库：沿用历史 data.db，老数据零迁移
+DEFAULT_DB_NAME = "data.db"
+DB_PATH = os.path.join(DATA_DIR, DEFAULT_DB_NAME)
+# 学生注册表：只存学生名单，与错题数据分库
+STUDENTS_DB_PATH = os.path.join(DATA_DIR, "students.db")
+
+# 当前请求使用的学生库（每个请求独立，避免并发串库）。
+# 未显式设置时回退到默认库，保证单学生/未登录场景可用。
+_current_db: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_db", default=None
+)
+
+
+def set_current_db(db_file: str | None) -> contextvars.Token:
+    """设置当前请求使用的学生库（文件名或绝对路径）。返回 token 便于 reset。"""
+    if not db_file:
+        return _current_db.set(None)
+    path = db_file if os.path.isabs(db_file) else os.path.join(DATA_DIR, db_file)
+    return _current_db.set(path)
+
+
+def get_current_db_path() -> str:
+    """当前请求实际使用的数据库绝对路径。"""
+    return _current_db.get() or DB_PATH
+
+
+def reset_current_db(token: contextvars.Token) -> None:
+    """请求结束后恢复当前学生库上下文。"""
+    try:
+        _current_db.reset(token)
+    except ValueError:
+        pass
 
 
 def get_db():
     """
-    获取数据库连接，设置 row_factory 为 sqlite3.Row 以便按列名访问"""
-    conn = sqlite3.connect(DB_PATH)
+    获取数据库连接，设置 row_factory 为 sqlite3.Row 以便按列名访问。
+    连接的是「当前学生」对应的库（由 set_current_db 决定），未设置时用默认库。"""
+    conn = sqlite3.connect(get_current_db_path())
     conn.row_factory = sqlite3.Row
     return conn
 
 
-def init_db():
-    conn = get_db()
+# --- 学生注册表（多账户） ---
+
+
+def get_students_db():
+    """获取学生注册表连接（始终指向 students.db，不受当前学生切换影响）。"""
+    conn = sqlite3.connect(STUDENTS_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_students_db():
+    """创建学生注册表；若为空则把历史 data.db 登记为「默认」学生。"""
+    conn = get_students_db()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            db_file TEXT NOT NULL,
+            created_at TIMESTAMP
+        )
+        """
+    )
+    conn.commit()
+    count = conn.execute("SELECT COUNT(*) AS c FROM students").fetchone()["c"]
+    if count == 0:
+        conn.execute(
+            "INSERT INTO students (name, db_file, created_at) VALUES (?, ?, ?)",
+            ("默认", DEFAULT_DB_NAME, _now()),
+        )
+        conn.commit()
+    conn.close()
+
+
+def list_students() -> list[dict]:
+    """返回所有学生（按 id 升序）。"""
+    init_students_db()
+    conn = get_students_db()
+    rows = conn.execute(
+        "SELECT id, name, db_file, created_at FROM students ORDER BY id ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_student(student_id: int) -> dict | None:
+    init_students_db()
+    conn = get_students_db()
+    row = conn.execute(
+        "SELECT id, name, db_file, created_at FROM students WHERE id = ?",
+        (student_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def resolve_student_db(student_id: int | None) -> str:
+    """把学生 id 解析为库文件名；无效/为空时回退到第一个学生（默认库）。"""
+    init_students_db()
+    if student_id is not None:
+        student = get_student(student_id)
+        if student:
+            return student["db_file"]
+    students = list_students()
+    return students[0]["db_file"] if students else DEFAULT_DB_NAME
+
+
+def create_student(name: str) -> dict:
+    """新建学生：登记到注册表并对其专属库执行 init_db。"""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("学生名不能为空")
+    init_students_db()
+    conn = get_students_db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO students (name, db_file, created_at) VALUES (?, ?, ?)",
+            (name, "", _now()),
+        )
+        sid = cur.lastrowid
+        db_file = f"data_s{sid}.db"
+        conn.execute(
+            "UPDATE students SET db_file = ? WHERE id = ?", (db_file, sid)
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise ValueError("该学生名已存在")
+    conn.close()
+    init_db(os.path.join(DATA_DIR, db_file))
+    return get_student(sid)
+
+
+def rename_student(student_id: int, name: str) -> dict:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("学生名不能为空")
+    init_students_db()
+    conn = get_students_db()
+    try:
+        cur = conn.execute(
+            "UPDATE students SET name = ? WHERE id = ?", (name, student_id)
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise ValueError("该学生名已存在")
+    changed = cur.rowcount
+    conn.close()
+    if not changed:
+        raise ValueError("学生不存在")
+    return get_student(student_id)
+
+
+def delete_student(student_id: int) -> bool:
+    """删除学生：移除注册行并删除其专属库文件（图片文件保留）。
+    不允许删除最后一个学生（默认库）。"""
+    init_students_db()
+    student = get_student(student_id)
+    if not student:
+        raise ValueError("学生不存在")
+    students = list_students()
+    if len(students) <= 1:
+        raise ValueError("至少需要保留一个学生，无法删除")
+    conn = get_students_db()
+    conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+    conn.commit()
+    conn.close()
+    db_file = student["db_file"]
+    # 默认库（资源篮）不删文件，避免误删历史数据
+    if db_file and db_file != DEFAULT_DB_NAME:
+        path = os.path.join(DATA_DIR, db_file)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError as exc:  # noqa: BLE001
+            logger.warning(f"[DB] 删除学生库文件失败 {path}：{exc}")
+    return True
+
+
+def init_db(db_path: str | None = None):
+    """初始化指定库（默认：当前学生库）。db_path 为空时用当前请求库。"""
+    target = db_path or get_current_db_path()
+    conn = sqlite3.connect(target)
+    conn.row_factory = sqlite3.Row
     conn.execute("""
         CREATE TABLE IF NOT EXISTS images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -928,38 +1106,94 @@ def _empty_totals() -> dict:
 
 
 def get_token_stats() -> dict:
-    """返回 token 统计：历史总量 + 当月每日消耗（仅当月有明细数据）。"""
-    month = datetime.now().strftime("%Y-%m")
+    """返回当前学生 token 统计：历史总量 + 当月每日消耗（仅当月有明细数据）。"""
     conn = get_db()
     try:
-        total_rows = conn.execute("SELECT * FROM ai_token_total").fetchall()
-        daily_rows = conn.execute(
-            """SELECT category, date(created_at) AS day,
-                      SUM(prompt_tokens) AS prompt_tokens,
-                      SUM(completion_tokens) AS completion_tokens,
-                      SUM(total_tokens) AS total_tokens,
-                      SUM(cached_tokens) AS cached_tokens,
-                      COUNT(*) AS calls
-               FROM ai_token_usage
-               WHERE substr(created_at, 1, 7) = ?
-               GROUP BY category, day
-               ORDER BY day ASC""",
-            (month,),
-        ).fetchall()
-        month_total_rows = conn.execute(
-            """SELECT category,
-                      SUM(prompt_tokens) AS prompt_tokens,
-                      SUM(completion_tokens) AS completion_tokens,
-                      SUM(total_tokens) AS total_tokens,
-                      SUM(cached_tokens) AS cached_tokens,
-                      COUNT(*) AS calls
-               FROM ai_token_usage
-               WHERE substr(created_at, 1, 7) = ?
-               GROUP BY category""",
-            (month,),
-        ).fetchall()
+        return _compute_token_stats(conn)
     finally:
         conn.close()
+
+
+def get_family_token_stats() -> dict:
+    """全家合计 token 统计：遍历所有学生库累加，并附各学生分项。
+
+    返回：{month, grand:{history,month}, categories:{cat:{history,month}},
+           students:[{id,name,grand:{history,month}}]}
+    """
+    month = datetime.now().strftime("%Y-%m")
+    grand_history = _empty_totals()
+    grand_month = _empty_totals()
+    cat_history = {c: _empty_totals() for c in TOKEN_CATEGORIES}
+    cat_month = {c: _empty_totals() for c in TOKEN_CATEGORIES}
+    per_student = []
+
+    for student in list_students():
+        db_file = os.path.join(DATA_DIR, student["db_file"] or DEFAULT_DB_NAME)
+        if not os.path.exists(db_file):
+            continue
+        conn = sqlite3.connect(db_file)
+        conn.row_factory = sqlite3.Row
+        try:
+            stats = _compute_token_stats(conn)
+        except sqlite3.Error:
+            conn.close()
+            continue
+        conn.close()
+        for key in ("prompt", "completion", "total", "cached", "calls"):
+            grand_history[key] += stats["grand"]["history"][key]
+            grand_month[key] += stats["grand"]["month"][key]
+        for cat in TOKEN_CATEGORIES:
+            for key in ("prompt", "completion", "total", "cached", "calls"):
+                cat_history[cat][key] += stats["categories"][cat]["history"][key]
+                cat_month[cat][key] += stats["categories"][cat]["month"][key]
+        per_student.append(
+            {
+                "id": student["id"],
+                "name": student["name"],
+                "grand": stats["grand"],
+            }
+        )
+
+    return {
+        "month": month,
+        "grand": {"history": grand_history, "month": grand_month},
+        "categories": {
+            cat: {"history": cat_history[cat], "month": cat_month[cat]}
+            for cat in TOKEN_CATEGORIES
+        },
+        "students": per_student,
+    }
+
+
+def _compute_token_stats(conn) -> dict:
+    """在给定连接上计算 token 统计（供单学生与全家合计复用）。"""
+    month = datetime.now().strftime("%Y-%m")
+    total_rows = conn.execute("SELECT * FROM ai_token_total").fetchall()
+    daily_rows = conn.execute(
+        """SELECT category, date(created_at) AS day,
+                  SUM(prompt_tokens) AS prompt_tokens,
+                  SUM(completion_tokens) AS completion_tokens,
+                  SUM(total_tokens) AS total_tokens,
+                  SUM(cached_tokens) AS cached_tokens,
+                  COUNT(*) AS calls
+           FROM ai_token_usage
+           WHERE substr(created_at, 1, 7) = ?
+           GROUP BY category, day
+           ORDER BY day ASC""",
+        (month,),
+    ).fetchall()
+    month_total_rows = conn.execute(
+        """SELECT category,
+                  SUM(prompt_tokens) AS prompt_tokens,
+                  SUM(completion_tokens) AS completion_tokens,
+                  SUM(total_tokens) AS total_tokens,
+                  SUM(cached_tokens) AS cached_tokens,
+                  COUNT(*) AS calls
+           FROM ai_token_usage
+           WHERE substr(created_at, 1, 7) = ?
+           GROUP BY category""",
+        (month,),
+    ).fetchall()
 
     history = {c: _empty_totals() for c in TOKEN_CATEGORIES}
     for row in total_rows:

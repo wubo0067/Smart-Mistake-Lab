@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, User } from 'lucide-react';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -84,7 +84,26 @@ function TokenDailyChart({ daily }) {
 
 // ============== API HELPERS ==============
 
+// 当前学生 id：存 localStorage，所有请求经 X-Student-Id 头带给后端
+const STUDENT_LS_KEY = 'mnb_student_id';
+function getStudentId() {
+  try { return localStorage.getItem(STUDENT_LS_KEY) || ''; } catch (e) { return ''; }
+}
+function setStudentId(id) {
+  try {
+    if (id == null || id === '') localStorage.removeItem(STUDENT_LS_KEY);
+    else localStorage.setItem(STUDENT_LS_KEY, String(id));
+  } catch (e) { /* ignore */ }
+}
+function withStudentHeader(options = {}) {
+  const headers = { ...(options.headers || {}) };
+  const sid = getStudentId();
+  if (sid) headers['X-Student-Id'] = sid;
+  return { ...options, headers };
+}
+
 async function apiFetch(url, options = {}) {
+  options = withStudentHeader(options);
   const method = options.method || 'GET';
   console.log(`[API] ${method} ${url}`, options.body ? JSON.parse(options.body) : '');
   const r = await fetch(url, options);
@@ -100,6 +119,26 @@ async function apiFetch(url, options = {}) {
 }
 
 const API = {
+  async getStudents() {
+    return (await apiFetch('/api/students')).json();
+  },
+  async createStudent(name) {
+    return (await apiFetch('/api/students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })).json();
+  },
+  async renameStudent(id, name) {
+    return (await apiFetch(`/api/students/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })).json();
+  },
+  async deleteStudent(id) {
+    return (await apiFetch(`/api/students/${id}`, { method: 'DELETE' })).json();
+  },
   async getConfig() {
     return (await apiFetch('/api/config')).json();
   },
@@ -117,8 +156,8 @@ const API = {
       body: JSON.stringify(config)
     })).json();
   },
-  async getTokenStats() {
-    return (await apiFetch('/api/token-stats')).json();
+  async getTokenStats(scope = 'student') {
+    return (await apiFetch(`/api/token-stats?scope=${scope}`)).json();
   },
   async scan() {
     return (await apiFetch('/api/scan')).json();
@@ -184,7 +223,9 @@ const API = {
     })).json();
   },
   imageUrl(filePath) {
-    return `/api/image-file?path=${encodeURIComponent(filePath)}`;
+    const sid = getStudentId();
+    const sidQ = sid ? `&sid=${encodeURIComponent(sid)}` : '';
+    return `/api/image-file?path=${encodeURIComponent(filePath)}${sidQ}`;
   }
 };
 
@@ -239,6 +280,16 @@ const CSS = `
 }
 .mnb h1 .hl { background: linear-gradient(transparent 60%, var(--accent) 60%); padding: 0 2px; }
 .mnb .subtitle { color: var(--ink-soft); font-size: 13px; margin-top: 4px; }
+.mnb .student-switch {
+  display: flex; align-items: center; font-size: 13px; color: var(--ink);
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 8px;
+  padding: 6px 10px; box-shadow: 0 2px 6px var(--shadow);
+}
+.mnb .student-switch select {
+  font-family: "Songti SC", "STSong", serif; font-size: 14px; font-weight: 700;
+  border: none; background: transparent; color: var(--ink); cursor: pointer;
+  outline: none; max-width: 140px;
+}
 .mnb .tabs { display: flex; gap: 6px; }
 .mnb .tab-btn {
   font-family: "Songti SC", "STSong", serif;
@@ -293,6 +344,40 @@ const CSS = `
 }
 .mnb .save-msg { font-size: 12.5px; color: var(--accent-2); margin-top: 8px; font-weight: 600; }
 .mnb .save-msg.error { color: var(--margin); }
+
+/* 学生管理 */
+.mnb .student-list { display: flex; flex-direction: column; gap: 6px; }
+.mnb .student-row {
+  display: flex; align-items: center; gap: 10px;
+  border: 1.5px solid var(--grid); border-radius: 8px; padding: 8px 12px;
+  background: var(--paper);
+}
+.mnb .student-row.current { border-color: var(--accent); background: rgba(255, 236, 179, 0.35); }
+.mnb .mini-btn {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 12px; padding: 4px 9px; border-radius: 6px;
+  border: 1.5px solid var(--ink); background: var(--card); color: var(--ink);
+  cursor: pointer; transition: all .12s ease;
+}
+.mnb .mini-btn:hover { background: var(--ink); color: var(--card); }
+.mnb .mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.mnb .mini-btn.danger { border-color: var(--margin); color: var(--margin); }
+.mnb .mini-btn.danger:hover { background: var(--margin); color: #fff; }
+.mnb .confirm-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+  border: 1.5px solid var(--margin); background: rgba(229, 83, 75, 0.08);
+  font-size: 12.5px; color: var(--ink);
+}
+.mnb .scope-toggle {
+  display: inline-flex; border: 1.5px solid var(--ink); border-radius: 7px; overflow: hidden;
+}
+.mnb .scope-btn {
+  font-size: 12px; padding: 4px 12px; border: none; cursor: pointer;
+  background: var(--paper); color: var(--ink-soft); font-family: inherit;
+}
+.mnb .scope-btn + .scope-btn { border-left: 1.5px solid var(--ink); }
+.mnb .scope-btn.active { background: var(--ink); color: var(--card); font-weight: 700; }
 
 /* AI 重新分析的自定义提示输入 */
 .mnb .reanalyze-prompt { margin: 0 0 14px; }
@@ -1930,6 +2015,19 @@ export default function App() {
   const [tokenStats, setTokenStats] = useState(null);
   const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
   const [tokenStatsError, setTokenStatsError] = useState('');
+  const [tokenScope, setTokenScope] = useState('student'); // student | all
+
+  // --- 多学生（账户）---
+  const [students, setStudents] = useState([]);
+  const [currentStudentId, setCurrentStudentId] = useState(() => {
+    try { return Number(localStorage.getItem('mnb_student_id')) || null; } catch (e) { return null; }
+  });
+  const [newStudentName, setNewStudentName] = useState('');
+  const [studentMsg, setStudentMsg] = useState('');
+  const [studentBusy, setStudentBusy] = useState(false);
+  const [deleteStudentTarget, setDeleteStudentTarget] = useState(null);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // --- Timeline state ---
   const [timelineDays, setTimelineDays] = useState([]);
@@ -1996,28 +2094,112 @@ export default function App() {
   // { mode, query_text, results }；results 同时用于详情弹窗的相似结果翻页
   const [similarResult, setSimilarResult] = useState(null);
 
-  // --- Load configs on mount ---
-  useEffect(() => {
+  // --- Load configs for the current student ---
+  function loadConfig() {
     API.getConfig().then((c) => {
-      if (c.image_dir) {
-        setImageDir(c.image_dir);
-        setDirInput(c.image_dir);
-      }
-      if (c.focus_timeout_hours) {
-        const v = Number(c.focus_timeout_hours);
-        if (v > 0) {
-          setFocusTimeoutHours(v);
-          setFocusTimeoutInput(String(v));
-        }
-      }
-      if (c.focus_max_per_subject) {
-        const v = Number(c.focus_max_per_subject);
-        if (v > 0) {
-          setFocusMaxPerSubject(v);
-        }
-      }
+      setImageDir(c.image_dir || '');
+      setDirInput(c.image_dir || '');
+      const v = Number(c.focus_timeout_hours);
+      if (v > 0) { setFocusTimeoutHours(v); setFocusTimeoutInput(String(v)); }
+      const m = Number(c.focus_max_per_subject);
+      if (m > 0) setFocusMaxPerSubject(m);
     }).catch(() => { });
+  }
+
+  // --- Load students on mount, then load current student's config ---
+  useEffect(() => {
+    API.getStudents().then((data) => {
+      const list = data.students || [];
+      setStudents(list);
+      const saved = Number(localStorage.getItem('mnb_student_id')) || null;
+      const valid = list.find((s) => s.id === saved);
+      const active = valid || list.find((s) => s.id === data.current_id) || list[0];
+      if (active) {
+        setCurrentStudentId(active.id);
+        setStudentId(active.id);
+      }
+      loadConfig();
+    }).catch(() => { loadConfig(); });
   }, []);
+
+  // --- 切换学生：重置所有按学生隔离的 state 并重新加载 ---
+  function switchStudent(id) {
+    if (id === currentStudentId) return;
+    setStudentId(id);
+    setCurrentStudentId(id);
+    // 重置列表/缓存类 state，触发对应 tab 重新加载
+    setScanData(null);
+    setAllIndexed([]);
+    setTotalIndexedCount(0);
+    setLibLoaded(false);
+    setSubjects([]);
+    setFocusItems([]);
+    setFocusCount(0);
+    setFocusLoaded(false);
+    setFocusOverdueCount(0);
+    setFocusReminders({});
+    setTimelineDays([]);
+    setTimelineLoaded(false);
+    setTimelineOffset(0);
+    setTimelineHasMore(true);
+    setTokenStats(null);
+    setDetail(null);
+    loadConfig();
+    // 若当前停留在依赖数据的 tab，立即重新拉取
+    if (tab === 'library') loadLibrary({ subject: null });
+    if (tab === 'focus') loadFocusItems();
+    if (tab === 'timeline') loadTimeline(0);
+    if (tab === 'config') loadTokenStats();
+  }
+
+  async function addStudent() {
+    const name = newStudentName.trim();
+    if (!name) { setStudentMsg('请输入学生名'); return; }
+    setStudentBusy(true); setStudentMsg('');
+    try {
+      const created = await API.createStudent(name);
+      const data = await API.getStudents();
+      setStudents(data.students || []);
+      setNewStudentName('');
+      setStudentMsg(`已创建「${created.name}」`);
+      switchStudent(created.id);
+    } catch (e) {
+      setStudentMsg(`创建失败：${e.message}`);
+    } finally {
+      setStudentBusy(false);
+    }
+  }
+
+  async function removeStudent(id) {
+    setStudentBusy(true);
+    try {
+      await API.deleteStudent(id);
+      const data = await API.getStudents();
+      setStudents(data.students || []);
+      setDeleteStudentTarget(null);
+      if (id === currentStudentId) {
+        const next = (data.students || [])[0];
+        if (next) switchStudent(next.id);
+      }
+    } catch (e) {
+      setStudentMsg(`删除失败：${e.message}`);
+    } finally {
+      setStudentBusy(false);
+    }
+  }
+
+  async function renameStudent(id) {
+    const name = renameValue.trim();
+    setRenamingId(null);
+    if (!name) return;
+    try {
+      await API.renameStudent(id, name);
+      const data = await API.getStudents();
+      setStudents(data.students || []);
+    } catch (e) {
+      setStudentMsg(`重命名失败：${e.message}`);
+    }
+  }
 
   // Auto-correct activeSubject when subjects load (default to 数学，fallback to first)
   useEffect(() => {
@@ -2054,11 +2236,12 @@ export default function App() {
     }
   }, [tab]);
 
-  async function loadTokenStats() {
+  async function loadTokenStats(scope) {
+    const useScope = scope || tokenScope;
     setTokenStatsLoading(true);
     setTokenStatsError('');
     try {
-      const data = await API.getTokenStats();
+      const data = await API.getTokenStats(useScope);
       setTokenStats(data);
     } catch (e) {
       setTokenStatsError(`统计加载失败：${e.message}`);
@@ -2362,12 +2545,12 @@ export default function App() {
     setAnalyzing(true);
     try {
       console.log('[Analysis] calling server /api/analyze');
-      const resp = await fetch('/api/analyze', {
+      const resp = await fetch('/api/analyze', withStudentHeader({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_path: filePath }),
         signal: controller.signal
-      });
+      }));
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({}));
@@ -2920,7 +3103,7 @@ export default function App() {
     const isForeground = () =>
       seq === detailAnalyzeSeqRef.current && activeDetailPathRef.current === analyzedPath;
     try {
-      const resp = await fetch('/api/analyze', {
+      const resp = await fetch('/api/analyze', withStudentHeader({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // 若「AI 提取题目内容」编辑框已有内容，直接复用，不再从图片提取
@@ -2932,7 +3115,7 @@ export default function App() {
           user_prompt: prompt || undefined,
           previous_summary: prevSummary || undefined
         })
-      });
+      }));
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({}));
         throw new Error(errData.detail || `HTTP ${resp.status}`);
@@ -3079,11 +3262,11 @@ export default function App() {
   async function uploadSolutionImage(base64Data, ext = 'png') {
     if (!detail) return;
     try {
-      const resp = await fetch('/api/solution-image', {
+      const resp = await fetch('/api/solution-image', withStudentHeader({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_path: detail.file_path, image_data: base64Data, ext })
-      });
+      }));
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${resp.status}`);
@@ -3102,7 +3285,7 @@ export default function App() {
   async function deleteSolutionImage(filename) {
     try {
       const filePath = getSolutionFullPath(filename);
-      const resp = await fetch(`/api/solution-image?path=${encodeURIComponent(filePath)}`, { method: 'DELETE' });
+      const resp = await fetch(`/api/solution-image?path=${encodeURIComponent(filePath)}`, withStudentHeader({ method: 'DELETE' }));
       if (!resp.ok && resp.status !== 404) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${resp.status}`);
@@ -3192,6 +3375,16 @@ export default function App() {
             <h1>错题<span className="hl">本</span></h1>
             <div className="subtitle">目录扫描 · AI 打标签 · 按考点查题</div>
           </div>
+          {students.length > 0 && (
+            <div className="student-switch" title="切换学生，错题库/重点练/统计均按学生隔离">
+              <User size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
+              <select value={currentStudentId || ''} onChange={(e) => switchStudent(Number(e.target.value))}>
+                {students.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="tabs">
             <button className={'tab-btn' + (tab === 'scan' ? ' active' : '')} onClick={() => setTab('scan')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，可放心切换其它页面' : undefined}>
@@ -3222,7 +3415,70 @@ export default function App() {
         {/* ============ CONFIG TAB ============ */}
         {tab === 'config' && (
           <div className="panel">
+            {/* ============ 学生管理 ============ */}
             <div className="config-box">
+              <h2 className="config-title">学生管理</h2>
+              <p className="config-hint">
+                每个学生拥有独立的错题库、重点练与图片目录，数据完全隔离。切换学生在顶部右上角进行。
+              </p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+                <input type="text" value={newStudentName}
+                  onChange={(e) => setNewStudentName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addStudent(); }}
+                  placeholder="新学生姓名" style={{ flex: 1, minWidth: 160, maxWidth: 240 }} />
+                <button className="save-btn" style={{ marginTop: 0, padding: '6px 14px', fontSize: 13 }}
+                  onClick={addStudent} disabled={studentBusy || !newStudentName.trim()}>
+                  <Plus size={14} style={{ marginRight: 4, verticalAlign: -2 }} />添加学生
+                </button>
+              </div>
+              {studentMsg && <div className={'save-msg' + (studentMsg.includes('失败') ? ' error' : '')} style={{ marginTop: 0, marginBottom: 10 }}>{studentMsg}</div>}
+              <div className="student-list">
+                {students.map((s) => (
+                  <div key={s.id} className={'student-row' + (s.id === currentStudentId ? ' current' : '')}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {renamingId === s.id ? (
+                        <input type="text" value={renameValue} autoFocus
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={() => renameStudent(s.id)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') renameStudent(s.id); if (e.key === 'Escape') setRenamingId(null); }}
+                          style={{ fontSize: 14, fontWeight: 700, width: '100%', maxWidth: 200 }} />
+                      ) : (
+                        <span style={{ fontSize: 14, fontWeight: s.id === currentStudentId ? 700 : 400 }}>
+                          {s.name}
+                          {s.id === currentStudentId && <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 6 }}>当前</span>}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {s.id !== currentStudentId && (
+                        <button className="mini-btn" title="切换到该学生" onClick={() => switchStudent(s.id)}>切换</button>
+                      )}
+                      <button className="mini-btn" title="重命名"
+                        onClick={() => { setRenamingId(s.id); setRenameValue(s.name); }}>
+                        <Edit3 size={13} />
+                      </button>
+                      <button className="mini-btn danger" title="删除该学生（含其全部错题数据）"
+                        disabled={students.length <= 1 || studentBusy}
+                        onClick={() => setDeleteStudentTarget(s)}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {deleteStudentTarget && (
+                <div className="confirm-bar">
+                  确认删除「{deleteStudentTarget.name}」？该学生的错题库、重点练与 AI 统计将一并删除，且不可恢复。
+                  <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                    <button className="mini-btn" onClick={() => setDeleteStudentTarget(null)}>取消</button>
+                    <button className="mini-btn danger" disabled={studentBusy}
+                      onClick={() => removeStudent(deleteStudentTarget.id)}>确认删除</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="config-box" style={{ marginTop: 20 }}>
               <h2 className="config-title">基础配置</h2>
               <div className="field" style={{ marginBottom: 14 }}>
                 <label className="field-label">图片目录路径</label>
@@ -3272,10 +3528,18 @@ export default function App() {
             <div className="config-box" style={{ marginTop: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <h2 className="config-title" style={{ margin: 0 }}>AI Token 统计</h2>
-                <button className="save-btn" style={{ marginTop: 0, padding: '4px 10px', fontSize: 12 }}
-                  onClick={loadTokenStats} disabled={tokenStatsLoading}>
-                  {tokenStatsLoading ? '刷新中…' : '刷新'}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="scope-toggle">
+                    <button className={'scope-btn' + (tokenScope === 'student' ? ' active' : '')}
+                      onClick={() => { setTokenScope('student'); loadTokenStats('student'); }}>当前学生</button>
+                    <button className={'scope-btn' + (tokenScope === 'all' ? ' active' : '')}
+                      onClick={() => { setTokenScope('all'); loadTokenStats('all'); }}>全家合计</button>
+                  </div>
+                  <button className="save-btn" style={{ marginTop: 0, padding: '4px 10px', fontSize: 12 }}
+                    onClick={() => loadTokenStats()} disabled={tokenStatsLoading}>
+                    {tokenStatsLoading ? '刷新中…' : '刷新'}
+                  </button>
+                </div>
               </div>
               <p className="config-hint">
                 按「图片题目提取」与「解题分析」两类分别统计 token 消耗。历史总量永久累计；每日明细仅保留当前月（{tokenStats?.month || '—'}）。缓存命中来自 API 返回的 cached_tokens（Ollama 端点不上报，恒为 0）。
@@ -3289,11 +3553,26 @@ export default function App() {
                 <div style={{ marginTop: 12 }}>
                   {/* 顶部合计 */}
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-                    <TokenStatCard label="历史总消耗" value={tokenStats.grand.history.total}
+                    <TokenStatCard label={tokenScope === 'all' ? '全家历史总消耗' : '历史总消耗'} value={tokenStats.grand.history.total}
                       sub={`${(tokenStats.grand.history.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.history.prompt)} / 输出 ${fmtTokens(tokenStats.grand.history.completion)} · 缓存命中 ${fmtTokens(tokenStats.grand.history.cached)}`} />
-                    <TokenStatCard label={`本月合计（${tokenStats.month}）`} value={tokenStats.grand.month.total}
+                    <TokenStatCard label={`${tokenScope === 'all' ? '全家' : ''}本月合计（${tokenStats.month}）`} value={tokenStats.grand.month.total}
                       sub={`${(tokenStats.grand.month.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.month.prompt)} / 输出 ${fmtTokens(tokenStats.grand.month.completion)} · 缓存命中 ${fmtTokens(tokenStats.grand.month.cached)}`} />
                   </div>
+
+                  {/* 各学生分项（仅全家合计） */}
+                  {tokenScope === 'all' && tokenStats.students && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 6 }}>各学生消耗</div>
+                      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                        {tokenStats.students.map((st) => (
+                          <TokenStatCard key={st.id} label={st.name}
+                            value={st.grand?.history?.total || 0}
+                            valueColor={st.id === currentStudentId ? 'var(--accent-2)' : undefined}
+                            sub={`本月 ${fmtTokens(st.grand?.month?.total || 0)} · 历史 ${(st.grand?.history?.calls || 0).toLocaleString()} 次调用`} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* 分类卡片 */}
                   <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -3311,11 +3590,15 @@ export default function App() {
                     })}
                   </div>
 
-                  {/* 当月每日消耗柱状图 */}
-                  <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 6 }}>
-                    本月每日消耗
-                  </div>
-                  <TokenDailyChart daily={tokenStats.daily} />
+                  {/* 当月每日消耗柱状图（仅单学生视图） */}
+                  {tokenScope === 'student' && (
+                    <React.Fragment>
+                      <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 6 }}>
+                        本月每日消耗
+                      </div>
+                      <TokenDailyChart daily={tokenStats.daily} />
+                    </React.Fragment>
+                  )}
                 </div>
               )}
 
