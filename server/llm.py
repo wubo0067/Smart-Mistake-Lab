@@ -965,6 +965,8 @@ class AiConfig:
     api_key: str = ""
     timeout: float = 120.0
     max_tokens: int = 4096
+    # 统计分类：image_analysis（图片题目提取）/ problem_ai（解题分析）
+    category: str = "problem_ai"
 
     @classmethod
     def for_image_analysis(cls) -> "AiConfig":
@@ -975,6 +977,7 @@ class AiConfig:
             api_key=os.getenv("IMAGE_ANALYSIS_API_KEY", ""),
             timeout=float(os.getenv("AI_TIMEOUT", "120")),
             max_tokens=int(os.getenv("AI_MAX_TOKENS", "4096")),
+            category="image_analysis",
         )
 
     @classmethod
@@ -986,6 +989,7 @@ class AiConfig:
             api_key=os.getenv("PROBLEM_API_KEY", ""),
             timeout=float(os.getenv("AI_TIMEOUT", "120")),
             max_tokens=int(os.getenv("AI_MAX_TOKENS", "4096")),
+            category="problem_ai",
         )
 
 
@@ -1185,6 +1189,60 @@ def _extract_json_from_tail(text: str) -> str:
             except json.JSONDecodeError:
                 continue  # 该段不是合法 JSON，继续找更早的闭合括号
     return ""
+
+
+def extract_usage_from_response(data: dict, api_url: str) -> dict:
+    """从 AI 响应中提取 token 用量，归一化为 {prompt, completion, total}。
+
+    兼容三种端点：
+    - OpenAI 兼容：usage.prompt_tokens / completion_tokens / total_tokens
+    - Ollama /api/chat：prompt_eval_count / eval_count
+    - Anthropic：usage.input_tokens / output_tokens
+    """
+    if not isinstance(data, dict):
+        return {"prompt": 0, "completion": 0, "total": 0}
+
+    def _int(value) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    if is_ollama_chat_endpoint(api_url):
+        prompt = _int(data.get("prompt_eval_count"))
+        completion = _int(data.get("eval_count"))
+        return {"prompt": prompt, "completion": completion, "total": prompt + completion}
+
+    usage = data.get("usage") or {}
+    if not isinstance(usage, dict):
+        usage = {}
+    prompt = _int(usage.get("prompt_tokens") or usage.get("input_tokens"))
+    completion = _int(usage.get("completion_tokens") or usage.get("output_tokens"))
+    total = _int(usage.get("total_tokens")) or (prompt + completion)
+    return {"prompt": prompt, "completion": completion, "total": total}
+
+
+def _record_token_usage(config: AiConfig, data: dict, api_url: str) -> None:
+    """记录本次调用的 token 消耗（旁路逻辑，失败不影响主流程）。"""
+    try:
+        import db
+
+        usage = extract_usage_from_response(data, api_url)
+        if usage["total"] <= 0:
+            return
+        db.record_token_usage(
+            config.category,
+            config.model,
+            usage["prompt"],
+            usage["completion"],
+            usage["total"],
+        )
+        logger.info(
+            f"[LLM] Token 用量（{config.category}）：prompt={usage['prompt']}, "
+            f"completion={usage['completion']}, total={usage['total']}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[LLM] Token 用量记录失败（不影响分析）：{exc}")
 
 
 def extract_text_from_response(data: dict, api_url: str) -> str:
@@ -1476,6 +1534,7 @@ async def _call_ai(
         raise RuntimeError(format_ai_error(err_detail))
 
     data = resp.json()
+    _record_token_usage(config, data, api_url)
     response_text = extract_text_from_response(data, api_url)
     if not response_text:
         logger.error(

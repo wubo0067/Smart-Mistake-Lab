@@ -136,6 +136,34 @@ def init_db():
     conn.execute(
         "UPDATE images SET difficulty = 3 WHERE difficulty IS NULL OR difficulty < 1 OR difficulty > 5"
     )
+    # AI token 用量明细表（仅保留当月，跨月自动清理，用于当月每日统计）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_token_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            model TEXT DEFAULT '',
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            created_at TIMESTAMP
+        )
+    """)
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_token_usage_cat_date ON ai_token_usage(category, created_at)"
+        )
+    except sqlite3.OperationalError:
+        pass
+    # AI token 历史累计表（按类别永久累计，不随跨月清理，用于历史总消耗）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ai_token_total (
+            category TEXT PRIMARY KEY,
+            prompt_tokens INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            calls INTEGER DEFAULT 0
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -808,3 +836,159 @@ def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> tuple[list[
         )
 
     return result, has_more
+
+
+# --- AI Token 用量统计 ---
+
+TOKEN_CATEGORIES = ("image_analysis", "problem_ai")
+
+
+def record_token_usage(
+    category: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+) -> None:
+    """记录一次 AI 调用的 token 消耗。
+
+    - 明细写入 ai_token_usage（仅保留当月，写入时清理非当月数据）
+    - 累计写入 ai_token_total（历史总量，永久保留）
+    """
+    if category not in TOKEN_CATEGORIES:
+        category = "problem_ai"
+    prompt_tokens = int(prompt_tokens or 0)
+    completion_tokens = int(completion_tokens or 0)
+    total_tokens = int(total_tokens or 0)
+    if total_tokens <= 0:
+        total_tokens = prompt_tokens + completion_tokens
+    if total_tokens <= 0:
+        return
+
+    now = _now()
+    month = datetime.now().strftime("%Y-%m")
+    conn = get_db()
+    try:
+        conn.execute(
+            """INSERT INTO ai_token_usage
+               (category, model, prompt_tokens, completion_tokens, total_tokens, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (category, model or "", prompt_tokens, completion_tokens, total_tokens, now),
+        )
+        conn.execute(
+            "DELETE FROM ai_token_usage WHERE substr(created_at, 1, 7) != ?", (month,)
+        )
+        conn.execute(
+            """INSERT INTO ai_token_total
+               (category, prompt_tokens, completion_tokens, total_tokens, calls)
+               VALUES (?, ?, ?, ?, 1)
+               ON CONFLICT(category) DO UPDATE SET
+                   prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                   completion_tokens = completion_tokens + excluded.completion_tokens,
+                   total_tokens = total_tokens + excluded.total_tokens,
+                   calls = calls + 1""",
+            (category, prompt_tokens, completion_tokens, total_tokens),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _empty_totals() -> dict:
+    return {"prompt": 0, "completion": 0, "total": 0, "calls": 0}
+
+
+def get_token_stats() -> dict:
+    """返回 token 统计：历史总量 + 当月每日消耗（仅当月有明细数据）。"""
+    month = datetime.now().strftime("%Y-%m")
+    conn = get_db()
+    try:
+        total_rows = conn.execute("SELECT * FROM ai_token_total").fetchall()
+        daily_rows = conn.execute(
+            """SELECT category, date(created_at) AS day,
+                      SUM(prompt_tokens) AS prompt_tokens,
+                      SUM(completion_tokens) AS completion_tokens,
+                      SUM(total_tokens) AS total_tokens,
+                      COUNT(*) AS calls
+               FROM ai_token_usage
+               WHERE substr(created_at, 1, 7) = ?
+               GROUP BY category, day
+               ORDER BY day ASC""",
+            (month,),
+        ).fetchall()
+        month_total_rows = conn.execute(
+            """SELECT category,
+                      SUM(prompt_tokens) AS prompt_tokens,
+                      SUM(completion_tokens) AS completion_tokens,
+                      SUM(total_tokens) AS total_tokens,
+                      COUNT(*) AS calls
+               FROM ai_token_usage
+               WHERE substr(created_at, 1, 7) = ?
+               GROUP BY category""",
+            (month,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    history = {c: _empty_totals() for c in TOKEN_CATEGORIES}
+    for row in total_rows:
+        cat = row["category"]
+        if cat not in history:
+            history[cat] = _empty_totals()
+        history[cat] = {
+            "prompt": row["prompt_tokens"] or 0,
+            "completion": row["completion_tokens"] or 0,
+            "total": row["total_tokens"] or 0,
+            "calls": row["calls"] or 0,
+        }
+
+    month_totals = {c: _empty_totals() for c in TOKEN_CATEGORIES}
+    for row in month_total_rows:
+        cat = row["category"]
+        if cat not in month_totals:
+            month_totals[cat] = _empty_totals()
+        month_totals[cat] = {
+            "prompt": row["prompt_tokens"] or 0,
+            "completion": row["completion_tokens"] or 0,
+            "total": row["total_tokens"] or 0,
+            "calls": row["calls"] or 0,
+        }
+
+    daily = {c: {} for c in TOKEN_CATEGORIES}
+    for row in daily_rows:
+        cat = row["category"]
+        if cat not in daily:
+            daily[cat] = {}
+        daily[cat][row["day"]] = {
+            "prompt": row["prompt_tokens"] or 0,
+            "completion": row["completion_tokens"] or 0,
+            "total": row["total_tokens"] or 0,
+            "calls": row["calls"] or 0,
+        }
+
+    # 补齐当月每一天（1 号 ~ 今天），无数据填 0
+    today = datetime.now().day
+    days = []
+    for day_no in range(1, today + 1):
+        day_str = f"{month}-{day_no:02d}"
+        entry = {"date": day_str, "day": day_no}
+        for cat in TOKEN_CATEGORIES:
+            entry[cat] = daily[cat].get(day_str, _empty_totals())
+        days.append(entry)
+
+    grand_history = _empty_totals()
+    grand_month = _empty_totals()
+    for cat in TOKEN_CATEGORIES:
+        for key in ("prompt", "completion", "total", "calls"):
+            grand_history[key] += history[cat][key]
+            grand_month[key] += month_totals[cat][key]
+
+    return {
+        "month": month,
+        "categories": {
+            cat: {"history": history[cat], "month": month_totals[cat]}
+            for cat in TOKEN_CATEGORIES
+        },
+        "grand": {"history": grand_history, "month": grand_month},
+        "daily": days,
+    }

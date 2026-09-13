@@ -8,6 +8,80 @@ function formatTime(ts) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// ============== TOKEN 统计辅助 ==============
+
+const TOKEN_CATEGORIES = [
+  { key: 'image_analysis', label: '图片题目提取', color: '#3b82f6' },
+  { key: 'problem_ai', label: '解题分析', color: '#10b981' },
+];
+
+// 大数字缩写：1234 → 1.2K，1234567 → 1.23M
+function fmtTokens(n) {
+  const v = Number(n) || 0;
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return String(v);
+}
+
+function TokenStatCard({ label, value, sub, valueColor }) {
+  return (
+    <div style={{
+      flex: '1 1 180px', minWidth: 160, padding: '12px 14px',
+      border: '1.5px solid var(--grid)', borderRadius: 10, background: 'var(--card)'
+    }}>
+      <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: valueColor || 'var(--ink)' }}>
+        {(Number(value) || 0).toLocaleString()}
+      </div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--ink-soft)', marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// 当月每日消耗柱状图：每天两根柱（两类），高度按当月单日最大值归一化
+function TokenDailyChart({ daily }) {
+  const days = daily || [];
+  const max = Math.max(1, ...days.flatMap(d => TOKEN_CATEGORIES.map(c => d[c.key]?.total || 0)));
+  if (days.length === 0) {
+    return <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>本月暂无调用记录</div>;
+  }
+  return (
+    <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, minHeight: 120, minWidth: days.length * 26 }}>
+        {days.map((d) => {
+          const dayTotal = TOKEN_CATEGORIES.reduce((s, c) => s + (d[c.key]?.total || 0), 0);
+          return (
+            <div key={d.date} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 22 }}
+              title={`${d.date}　总计 ${dayTotal.toLocaleString()}` + TOKEN_CATEGORIES.map(c => `　${c.label} ${(d[c.key]?.total || 0).toLocaleString()}`).join('')}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 90 }}>
+                {TOKEN_CATEGORIES.map((c) => {
+                  const v = d[c.key]?.total || 0;
+                  const h = v > 0 ? Math.max(3, Math.round((v / max) * 88)) : 0;
+                  return (
+                    <div key={c.key} style={{
+                      width: 8, height: h, background: c.color, borderRadius: 2,
+                      opacity: v > 0 ? 0.9 : 0.15, minHeight: 2
+                    }} />
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--ink-soft)', marginTop: 2 }}>{d.day}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 14, marginTop: 8 }}>
+        {TOKEN_CATEGORIES.map((c) => (
+          <span key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ink-soft)' }}>
+            <span style={{ width: 10, height: 10, background: c.color, borderRadius: 2, display: 'inline-block' }} />
+            {c.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ============== API HELPERS ==============
 
 async function apiFetch(url, options = {}) {
@@ -42,6 +116,9 @@ const API = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
     })).json();
+  },
+  async getTokenStats() {
+    return (await apiFetch('/api/token-stats')).json();
   },
   async scan() {
     return (await apiFetch('/api/scan')).json();
@@ -1849,6 +1926,11 @@ export default function App() {
   const [focusMaxPerSubject, setFocusMaxPerSubject] = useState(10);
   const [focusSubjects, setFocusSubjects] = useState([]);
 
+  // --- AI Token 统计（配置&统计 tab）---
+  const [tokenStats, setTokenStats] = useState(null);
+  const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
+  const [tokenStatsError, setTokenStatsError] = useState('');
+
   // --- Timeline state ---
   const [timelineDays, setTimelineDays] = useState([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
@@ -1964,6 +2046,26 @@ export default function App() {
       loadFocusItems();
     }
   }, [tab]);
+
+  // --- Load token stats when config tab changes（每次进入都刷新，能看到最新消耗）---
+  useEffect(() => {
+    if (tab === 'config') {
+      loadTokenStats();
+    }
+  }, [tab]);
+
+  async function loadTokenStats() {
+    setTokenStatsLoading(true);
+    setTokenStatsError('');
+    try {
+      const data = await API.getTokenStats();
+      setTokenStats(data);
+    } catch (e) {
+      setTokenStatsError(`统计加载失败：${e.message}`);
+    } finally {
+      setTokenStatsLoading(false);
+    }
+  }
 
   const debounceRef = useRef(null);
 
@@ -3112,7 +3214,7 @@ export default function App() {
             </button>
             <button className={'tab-btn' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
-              <Settings size={14} style={{ marginRight: 4, verticalAlign: -2 }} />配置
+              <Settings size={14} style={{ marginRight: 4, verticalAlign: -2 }} />配置&统计
             </button>
           </div>
         </div>
@@ -3179,6 +3281,57 @@ export default function App() {
                 💡 提示：设置每学科重点练上限后，需切换一次「重点练」标签页即可生效。
               </div>
             )}
+
+            {/* ============ AI TOKEN 统计 ============ */}
+            <div className="config-box" style={{ marginTop: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <h2 className="config-title" style={{ margin: 0 }}>AI Token 统计</h2>
+                <button className="save-btn" style={{ marginTop: 0, padding: '4px 10px', fontSize: 12 }}
+                  onClick={loadTokenStats} disabled={tokenStatsLoading}>
+                  {tokenStatsLoading ? '刷新中…' : '刷新'}
+                </button>
+              </div>
+              <p className="config-hint">
+                按「图片题目提取」与「解题分析」两类分别统计 token 消耗。历史总量永久累计；每日明细仅保留当前月（{tokenStats?.month || '—'}）。
+              </p>
+
+              {tokenStatsError && (
+                <div className="save-msg error" style={{ marginTop: 8 }}>{tokenStatsError}</div>
+              )}
+
+              {tokenStats && (
+                <div style={{ marginTop: 12 }}>
+                  {/* 顶部合计 */}
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+                    <TokenStatCard label="历史总消耗" value={tokenStats.grand.history.total}
+                      sub={`${(tokenStats.grand.history.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.history.prompt)} / 输出 ${fmtTokens(tokenStats.grand.history.completion)}`} />
+                    <TokenStatCard label={`本月合计（${tokenStats.month}）`} value={tokenStats.grand.month.total}
+                      sub={`${(tokenStats.grand.month.calls || 0).toLocaleString()} 次调用 · 输入 ${fmtTokens(tokenStats.grand.month.prompt)} / 输出 ${fmtTokens(tokenStats.grand.month.completion)}`} />
+                  </div>
+
+                  {/* 分类卡片 */}
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+                    {TOKEN_CATEGORIES.map((cat) => (
+                      <TokenStatCard key={cat.key}
+                        label={cat.label}
+                        value={tokenStats.categories[cat.key]?.history?.total || 0}
+                        valueColor={cat.color}
+                        sub={`本月 ${fmtTokens(tokenStats.categories[cat.key]?.month?.total || 0)} · 本月 ${(tokenStats.categories[cat.key]?.month?.calls || 0).toLocaleString()} 次`} />
+                    ))}
+                  </div>
+
+                  {/* 当月每日消耗柱状图 */}
+                  <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 6 }}>
+                    本月每日消耗
+                  </div>
+                  <TokenDailyChart daily={tokenStats.daily} />
+                </div>
+              )}
+
+              {!tokenStats && !tokenStatsLoading && !tokenStatsError && (
+                <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 8 }}>暂无统计数据</div>
+              )}
+            </div>
           </div>
         )}
 

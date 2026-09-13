@@ -149,6 +149,12 @@ def get_config():
     }
 
 
+@app.get("/api/token-stats")
+def token_stats():
+    """AI token 消耗统计：历史总量 + 当月每日消耗（仅保留当月明细）"""
+    return db.get_token_stats()
+
+
 @app.put("/api/config")
 def update_config(data: dict):
     if "image_dir" in data:
