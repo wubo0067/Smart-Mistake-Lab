@@ -550,14 +550,14 @@ def get_focus_practice_subject_counts() -> list[dict]:
 
 
 def get_focus_max_per_subject() -> int:
-    """从 config 表获取每学科重点练上限，默认 5"""
+    """从 config 表获取每学科重点练上限，默认 10"""
     val = get_config_value("focus_max_per_subject")
     if val is not None:
         try:
             return int(val)
         except (ValueError, TypeError):
             pass
-    return 5
+    return 10
 
 
 def get_focus_practice_count() -> int:
@@ -589,7 +589,7 @@ def set_focus_practice(file_path: str, enabled: bool) -> dict:
                 "success": False,
                 "reason": "题目不存在",
                 "count": 0,
-                "max_count": 5,
+                "max_count": 10,
                 "subject": "",
             }
 
@@ -658,7 +658,7 @@ def set_focus_practice(file_path: str, enabled: bool) -> dict:
             "success": False,
             "reason": str(e),
             "count": 0,
-            "max_count": 5,
+            "max_count": 10,
             "subject": "",
         }
 

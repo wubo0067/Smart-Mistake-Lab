@@ -1846,7 +1846,7 @@ export default function App() {
   const [focusOverdueCount, setFocusOverdueCount] = useState(0);
   const [focusReminders, setFocusReminders] = useState({});
   const [focusRemindersLoading, setFocusRemindersLoading] = useState(false);
-  const [focusMaxPerSubject, setFocusMaxPerSubject] = useState(5);
+  const [focusMaxPerSubject, setFocusMaxPerSubject] = useState(10);
   const [focusSubjects, setFocusSubjects] = useState([]);
 
   // --- Timeline state ---
@@ -1985,7 +1985,7 @@ export default function App() {
       setFocusCount(data.count ?? 0);
       setFocusTimeoutCfg(data.timeout_hours ?? 48);
       setFocusOverdueCount(data.overdue_count ?? 0);
-      setFocusMaxPerSubject(data.max_count ?? 5);
+      setFocusMaxPerSubject(data.max_count ?? 10);
       if (data.subjects) setFocusSubjects(data.subjects);
       setFocusError('');
       // 为所有重点练题目异步加载鼓励语
@@ -2021,7 +2021,7 @@ export default function App() {
       const focusData = await API.getFocusImages();
       setFocusItems(focusData.items || []);
       setFocusCount(focusData.count ?? 0);
-      setFocusMaxPerSubject(focusData.max_count ?? 5);
+      setFocusMaxPerSubject(focusData.max_count ?? 10);
       setFocusOverdueCount(focusData.overdue_count ?? 0);
       if (focusData.subjects) setFocusSubjects(focusData.subjects);
       // 清除旧提醒，重新加载
@@ -3039,8 +3039,8 @@ export default function App() {
                 <label className="field-label">每学科上限</label>
                 <input type="number" value={focusMaxPerSubject}
                   min={1} max={50}
-                  onChange={(e) => setFocusMaxPerSubject(Number(e.target.value) || 5)}
-                  placeholder="默认 5" />
+                  onChange={(e) => setFocusMaxPerSubject(Number(e.target.value) || 10)}
+                  placeholder="默认 10" />
                 <span style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 4, display: 'block' }}>
                   当前值：{focusMaxPerSubject} 道/学科
                 </span>
@@ -3721,7 +3721,7 @@ export default function App() {
                       // 错误已由 toggleFocusPractice 设置到 focusError
                     }
                   }}
-                  title={detail.is_focus_practice === 1 ? '取消重点练标识' : '将该题加入重点练（最多 5 道）'}>
+                  title={detail.is_focus_practice === 1 ? '取消重点练标识' : `将该题加入重点练（每学科最多 ${focusMaxPerSubject} 道）`}>
                   {detail.is_focus_practice === 1 ? '⭐ 取消重点练' : '⚡ 设为重点练'}
                 </button>
                 <button className="del-btn" onClick={openDeleteConfirm}>
