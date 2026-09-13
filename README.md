@@ -3,6 +3,7 @@
 一款基于 **AI 视觉识别**的多学科错题管理工具。支持**数学、物理、化学、英语、语文**五大学科，通过自动化流程简化错题整理。一键扫描本地图片文件夹，AI 自动识别题目内容并按学科分类打标签，支持详细的解答编辑、灵活的学习追踪、超时督促提醒等功能。
 
 **核心特色**：
+
 - 🤖 **AI 智能识别** — 自动提取题目文字、知识点标签和解题思路
 - 📂 **学科自动分类** — 按目录结构自动识别学科，无需手动标记
 - 💡 **专科知识库** — 每个学科内置 100+ 核心知识点库，分析更精准
@@ -87,27 +88,27 @@
 
 ## 技术栈
 
-| 层 | 技术 |
-|----|------|
-| 前端框架 | React 19 + Vite 7 |
-| 图标库 | Lucide React |
-| 后端 | Python FastAPI + Uvicorn |
-| AI 交互 | Python httpx（`server/llm.py`） |
-| 日志 | Python logging + RotatingFileHandler（`server/log.py`） |
-| 数据库 | SQLite（通过 Python sqlite3） |
+| 层     | 技术                                                            |
+| ----- | ------------------------------------------------------------- |
+| 前端框架  | React 19 + Vite 7                                             |
+| 图标库   | Lucide React                                                  |
+| 后端    | Python FastAPI + Uvicorn                                      |
+| AI 交互 | Python httpx（`server/llm.py`）                                 |
+| 日志    | Python logging + RotatingFileHandler（`server/log.py`）         |
+| 数据库   | SQLite（通过 Python sqlite3）                                     |
 | AI 接口 | 支持图片输入的 OpenAI Chat Completions / Anthropic Messages / Ollama |
 
 ## 🚀 快速开始
 
 ### 前置要求
 
-| 组件 | 版本要求 | 说明 |
-|------|----------|------|
-| Node.js | ≥ 18 | 前端构建和运行 |
-| npm | ≥ 9 | 前端包管理 |
-| Python | ≥ 3.10 | 后端服务（由 uv 自动管理） |
-| uv | 最新 | Python 包管理器与虚拟环境管理（推荐） |
-| AI 服务 | — | OpenAI/Claude/Ollama 等支持图片输入的模型服务 |
+| 组件      | 版本要求   | 说明                                |
+| ------- | ------ | --------------------------------- |
+| Node.js | ≥ 18   | 前端构建和运行                           |
+| npm     | ≥ 9    | 前端包管理                             |
+| Python  | ≥ 3.10 | 后端服务（由 uv 自动管理）                   |
+| uv      | 最新     | Python 包管理器与虚拟环境管理（推荐）            |
+| AI 服务   | —      | OpenAI/Claude/Ollama 等支持图片输入的模型服务 |
 
 ### 安装 uv
 
@@ -172,6 +173,7 @@ PROBLEM_API_KEY=sk-your-problem-analysis-api-key
 ```
 
 > 📌 **重要**：
+>
 > - **图片题目提取模型**（`IMAGE_ANALYSIS_*`）**必须支持图片输入**（如 GPT-4 Vision、Claude、LLaVA）。
 > - **解题分析模型**（`PROBLEM_*`）只需支持文本输入即可，可选用更便宜或更擅长结构化输出的模型。
 > - 不同 AI 服务的配置格式详见[「AI 配置（.env）」](#ai-配置env)部分。
@@ -181,16 +183,19 @@ PROBLEM_API_KEY=sk-your-problem-analysis-api-key
 项目提供脚本自动启动前后端服务。根据你的操作系统选择对应脚本：
 
 #### Windows (PowerShell)
+
 ```powershell
 .\start.ps1
 ```
 
 #### Windows (命令提示符)
+
 ```cmd
 start.bat
 ```
 
 #### Linux / macOS
+
 ```bash
 chmod +x start.sh
 ./start.sh
@@ -217,12 +222,12 @@ start.bat --ip 192.168.1.10
 
 其他启动参数：
 
-| 参数 | 说明 |
-|------|------|
-| `--ip <地址>` | 指定前后端绑定的 IP 地址（本机网卡实际 IP，不能是网关地址） |
-| `--no-frontend` | 仅启动后端服务 |
-| `--no-backend` | 仅启动前端服务 |
-| `--port <端口>` | 指定后端端口（默认 8765） |
+| 参数              | 说明                                |
+| --------------- | --------------------------------- |
+| `--ip <地址>`     | 指定前后端绑定的 IP 地址（本机网卡实际 IP，不能是网关地址） |
+| `--no-frontend` | 仅启动后端服务                           |
+| `--no-backend`  | 仅启动前端服务                           |
+| `--port <端口>`   | 指定后端端口（默认 8765）                   |
 
 ### 第 4 步：手动启动（开发调试）
 
@@ -328,24 +333,24 @@ PROBLEM_API_MODEL=your-text-model
 PROBLEM_API_KEY=sk-your-problem-analysis-api-key
 
 # ---- 通用配置（两套 AI 共用，可选）----
-# AI_TIMEOUT=120              # 单次 AI 请求超时（秒），默认 120
-# AI_MAX_TOKENS=4096          # 模型最大输出 token 数，默认 4096
+# AI_TIMEOUT=600             # 单次 AI 请求超时（秒），默认 600
+# AI_MAX_TOKENS=32768          # 模型最大输出 token 数，默认 2768
 ```
 
 > 所有 LLM 配置（URL / 模型名 / API Key）仅存于 `.env`，不会暴露到浏览器端，也不会写入数据库。修改后需重启后端服务（重新运行启动脚本，或手动执行 `uv run python server.py`）。
 
 #### 配置项说明
 
-| 变量 | 必填 | 默认值 | 说明 |
-|------|:----:|:------:|------|
-| `IMAGE_ANALYSIS_AI_API_URL` | ✅ | — | 图片题目提取服务地址（视觉模型） |
-| `IMAGE_ANALYSIS_AI_MODEL` | ✅ | — | 图片题目提取使用的模型名 |
-| `IMAGE_ANALYSIS_API_KEY` | 视服务 | — | 图片题目提取 API Key（Ollama 可留空） |
-| `PROBLEM_AI_API_URL` | ✅ | — | 解题分析服务地址（文本模型） |
-| `PROBLEM_API_MODEL` | ✅ | — | 解题分析使用的模型名 |
-| `PROBLEM_API_KEY` | 视服务 | — | 解题分析 API Key（Ollama 可留空） |
-| `AI_TIMEOUT` | 否 | `120` | 单次 AI 请求超时（秒） |
-| `AI_MAX_TOKENS` | 否 | `4096` | 模型最大输出 token 数；若分析结果被截断（日志出现 `max_tokens` 截断提示），可调大此值 |
+| 变量                          |  必填 |   默认值  | 说明                                                    |
+| --------------------------- | :-: | :----: | ----------------------------------------------------- |
+| `IMAGE_ANALYSIS_AI_API_URL` |  ✅  |    —   | 图片题目提取服务地址（视觉模型）                                      |
+| `IMAGE_ANALYSIS_AI_MODEL`   |  ✅  |    —   | 图片题目提取使用的模型名                                          |
+| `IMAGE_ANALYSIS_API_KEY`    | 视服务 |    —   | 图片题目提取 API Key（Ollama 可留空）                            |
+| `PROBLEM_AI_API_URL`        |  ✅  |    —   | 解题分析服务地址（文本模型）                                        |
+| `PROBLEM_API_MODEL`         |  ✅  |    —   | 解题分析使用的模型名                                            |
+| `PROBLEM_API_KEY`           | 视服务 |    —   | 解题分析 API Key（Ollama 可留空）                              |
+| `AI_TIMEOUT`                |  否  |  `120` | 单次 AI 请求超时（秒）                                         |
+| `AI_MAX_TOKENS`             |  否  | `4096` | 模型最大输出 token 数；若分析结果被截断（日志出现 `max_tokens` 截断提示），可调大此值 |
 
 职责说明：
 
@@ -366,11 +371,11 @@ PROBLEM_API_MODEL=gpt-4o-mini
 PROBLEM_API_KEY=sk-xxxxxxxx
 ```
 
-**DeepSeek（仅支持文本，只能用于解题分析，不能用于图片提取）**：
+**DeepSeek**：
 
 ```env
-PROBLEM_AI_API_URL=https://api.deepseek.com/v1/chat/completions
-PROBLEM_API_MODEL=deepseek-chat
+PROBLEM_AI_API_URL=https://api.deepseek.com
+PROBLEM_API_MODEL=deepseek-flash
 PROBLEM_API_KEY=sk-xxxxxxxx
 ```
 
@@ -408,11 +413,11 @@ AI_MAX_TOKENS=32768
 
 ### 支持的 AI 接口格式
 
-| 格式 | 鉴权方式 | 适用服务 |
-|------|----------|----------|
-| OpenAI 兼容 `/v1/chat/completions` | `Authorization: Bearer` | 支持图片输入的 OpenAI 兼容模型服务 |
-| Anthropic `/v1/messages` | `x-api-key` + `anthropic-version` | 支持图片输入的 Claude 模型服务 |
-| Ollama `/api/chat` | 无 | 本地 Ollama 服务（如 `http://localhost:11434`） |
+| 格式                               | 鉴权方式                              | 适用服务                                     |
+| -------------------------------- | --------------------------------- | ---------------------------------------- |
+| OpenAI 兼容 `/v1/chat/completions` | `Authorization: Bearer`           | 支持图片输入的 OpenAI 兼容模型服务                    |
+| Anthropic `/v1/messages`         | `x-api-key` + `anthropic-version` | 支持图片输入的 Claude 模型服务                      |
+| Ollama `/api/chat`               | 无                                 | 本地 Ollama 服务（如 `http://localhost:11434`） |
 
 程序会根据接口 URL 自动判断请求格式。如果直接填写 Ollama 的基础地址（如 `http://localhost:11434`），程序会自动补全为 `/api/chat`。
 
@@ -444,33 +449,33 @@ Smart-Mistake-Lab/
 
 ## API 接口一览
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/health` | 健康检查 |
-| GET | `/api/config` | 获取配置（图片目录、重点练超时阈值） |
-| PUT | `/api/config` | 保存配置（图片目录、重点练超时阈值） |
-| GET | `/api/ai-config` | 获取 AI 配置状态（仅展示 .env 中两套配置的 URL/模型/是否已设置 Key，不返回 Key 原文） |
-| PUT | `/api/ai-config` | 已废弃：LLM 配置仅由 .env 管理，写请求不再生效 |
-| GET | `/api/scan` | 扫描图片目录，按学科分组返回已索引/未索引文件列表（含 `subject_order`） |
-| GET | `/api/images/all` | 获取所有已索引图片，支持筛选参数 |
-|      |                    | - `subject`: 按学科筛选（默认空=全部） |
-|      |                    | - `query`: 关键词搜索（标题/内容/标签/备注） |
-|      |                    | - `mastery`: 按掌握程度筛选（mastered / unfamiliar / practice） |
-|      |                    | - `date_enabled`: 是否启用日期范围 |
-|      |                    | - `start_date` / `end_date`: 日期范围（YYYY-MM-DD） |
-|      |                    | 返回 `{items, total_count, filtered_count, subjects}` |
-| POST | `/api/images/index` | 将图片标记为已索引（自动推断学科，接收 title/content/tags/difficulty 等） |
-| PUT | `/api/images/update` | 更新已索引图片的元数据（含解答、掌握程度、难度、备注等） |
-| DELETE | `/api/images/delete` | 从索引中移除图片（参数：`file_path`），不删除文件 |
-| DELETE | `/api/images/purge` | 彻底删除图片：移除索引 + 删除原题图片 + 解答图片等关联资源（参数：`file_path`） |
-| GET | `/api/images/focus` | 获取重点练题目列表、数量及超时状态 |
-| PUT | `/api/images/focus` | 设为/取消重点练（每学科最多 10 道） |
-| POST | `/api/images/focus/reminders` | 批量生成重点练超时题目的鼓励语 |
-| POST | `/api/analyze` | 对指定图片进行 AI 分析（自动按学科选择知识点列表），返回 `{title, summary, tags}` |
-| POST | `/api/solution-image` | 上传解答图片，自动按 `{原文件名}_sol_{序号}.{扩展名}` 命名 |
-| DELETE | `/api/solution-image` | 删除指定路径的解答图片（参数：`path`） |
-| GET | `/api/timeline` | 获取时间线数据，按天/周/月聚合练习记录（参数：`offset`） |
-| GET | `/api/image-file` | 提供图片文件访问服务（参数：`path`） |
+| 方法     | 路径                            | 说明                                                      |
+| ------ | ----------------------------- | ------------------------------------------------------- |
+| GET    | `/api/health`                 | 健康检查                                                    |
+| GET    | `/api/config`                 | 获取配置（图片目录、重点练超时阈值）                                      |
+| PUT    | `/api/config`                 | 保存配置（图片目录、重点练超时阈值）                                      |
+| GET    | `/api/ai-config`              | 获取 AI 配置状态（仅展示 .env 中两套配置的 URL/模型/是否已设置 Key，不返回 Key 原文） |
+| PUT    | `/api/ai-config`              | 已废弃：LLM 配置仅由 .env 管理，写请求不再生效                            |
+| GET    | `/api/scan`                   | 扫描图片目录，按学科分组返回已索引/未索引文件列表（含 `subject_order`）            |
+| GET    | `/api/images/all`             | 获取所有已索引图片，支持筛选参数                                        |
+|        |                               | - `subject`: 按学科筛选（默认空=全部）                              |
+|        |                               | - `query`: 关键词搜索（标题/内容/标签/备注）                           |
+|        |                               | - `mastery`: 按掌握程度筛选（mastered / unfamiliar / practice）  |
+|        |                               | - `date_enabled`: 是否启用日期范围                              |
+|        |                               | - `start_date` / `end_date`: 日期范围（YYYY-MM-DD）           |
+|        |                               | 返回 `{items, total_count, filtered_count, subjects}`     |
+| POST   | `/api/images/index`           | 将图片标记为已索引（自动推断学科，接收 title/content/tags/difficulty 等）    |
+| PUT    | `/api/images/update`          | 更新已索引图片的元数据（含解答、掌握程度、难度、备注等）                            |
+| DELETE | `/api/images/delete`          | 从索引中移除图片（参数：`file_path`），不删除文件                          |
+| DELETE | `/api/images/purge`           | 彻底删除图片：移除索引 + 删除原题图片 + 解答图片等关联资源（参数：`file_path`）        |
+| GET    | `/api/images/focus`           | 获取重点练题目列表、数量及超时状态                                       |
+| PUT    | `/api/images/focus`           | 设为/取消重点练（每学科最多 10 道）                                    |
+| POST   | `/api/images/focus/reminders` | 批量生成重点练超时题目的鼓励语                                         |
+| POST   | `/api/analyze`                | 对指定图片进行 AI 分析（自动按学科选择知识点列表），返回 `{title, summary, tags}` |
+| POST   | `/api/solution-image`         | 上传解答图片，自动按 `{原文件名}_sol_{序号}.{扩展名}` 命名                   |
+| DELETE | `/api/solution-image`         | 删除指定路径的解答图片（参数：`path`）                                  |
+| GET    | `/api/timeline`               | 获取时间线数据，按天/周/月聚合练习记录（参数：`offset`）                       |
+| GET    | `/api/image-file`             | 提供图片文件访问服务（参数：`path`）                                   |
 
 ## 使用说明
 
@@ -507,23 +512,23 @@ Smart-Mistake-Lab/
 
 卡片本身会显示题目标题、前几个知识点标签、掌握程度、星级难度和练习次数；如果题目已标记为重点练，还会显示「重点练」标识。
 
-| 功能 | 说明 |
-|------|------|
-| **编辑标题** | 点击标题旁的 ✎ 按钮，修改后自动保存 |
-| **题目内容** | 查看/编辑 AI 提取的题目文字内容，修改后自动保存 |
-| **知识点标签** | 添加、修改（双击）、删除标签 |
-| **解答编辑** | 在解答文本框中输入解题思路或解析，内容自动保存 |
-| **粘贴图片** | 在解答区域按 Ctrl+V 粘贴剪贴板中的解题图片 |
-| **上传图片** | 点击"添加图片"按钮从本地选择解题图片 |
-| **双击查看原图** | 双击解答缩略图，全屏预览原图，点击遮罩或按 Esc 关闭 |
-| **删除图片** | 悬停解答图片，点击右上角 × 删除 |
-| **难度评分** | 通过星级设置题目难度（1=简单 ~ 5=困难） |
-| **掌握程度** | 设置掌握程度（已掌握 / 不熟悉 / 继续练习） |
-| **练习计数** | 点击"练习 +1"按钮增加练习次数 |
-| **题目翻页** | 在详情弹窗中可点击左右箭头切换上一题 / 下一题，也支持键盘左右方向键切换 |
-| **时间信息** | 详情页会显示题目添加时间和最近练习时间 |
-| **删除错题** | 点击删除按钮，弹出确认弹窗选择"仅移除索引"或"彻底删除" |
-| **备注笔记** | 添加自由文本备注 |
+| 功能         | 说明                                    |
+| ---------- | ------------------------------------- |
+| **编辑标题**   | 点击标题旁的 ✎ 按钮，修改后自动保存                   |
+| **题目内容**   | 查看/编辑 AI 提取的题目文字内容，修改后自动保存            |
+| **知识点标签**  | 添加、修改（双击）、删除标签                        |
+| **解答编辑**   | 在解答文本框中输入解题思路或解析，内容自动保存               |
+| **粘贴图片**   | 在解答区域按 Ctrl+V 粘贴剪贴板中的解题图片             |
+| **上传图片**   | 点击"添加图片"按钮从本地选择解题图片                   |
+| **双击查看原图** | 双击解答缩略图，全屏预览原图，点击遮罩或按 Esc 关闭          |
+| **删除图片**   | 悬停解答图片，点击右上角 × 删除                     |
+| **难度评分**   | 通过星级设置题目难度（1=简单 \~ 5=困难）              |
+| **掌握程度**   | 设置掌握程度（已掌握 / 不熟悉 / 继续练习）              |
+| **练习计数**   | 点击"练习 +1"按钮增加练习次数                     |
+| **题目翻页**   | 在详情弹窗中可点击左右箭头切换上一题 / 下一题，也支持键盘左右方向键切换 |
+| **时间信息**   | 详情页会显示题目添加时间和最近练习时间                   |
+| **删除错题**   | 点击删除按钮，弹出确认弹窗选择"仅移除索引"或"彻底删除"         |
+| **备注笔记**   | 添加自由文本备注                              |
 
 ### 日常使用
 
@@ -537,11 +542,11 @@ Smart-Mistake-Lab/
 
 ### 标签操作
 
-| 操作 | 方式 |
-|------|------|
-| 添加标签 | 在输入框输入后回车或点击 + 按钮 |
+| 操作   | 方式                     |
+| ---- | ---------------------- |
+| 添加标签 | 在输入框输入后回车或点击 + 按钮      |
 | 修改标签 | 双击标签，或点击编辑按钮 ✎，修改后回车确认 |
-| 删除标签 | 点击标签上的 × 按钮 |
+| 删除标签 | 点击标签上的 × 按钮            |
 
 ### 💡 使用小贴士
 
@@ -556,6 +561,7 @@ Smart-Mistake-Lab/
 ### 图片管理
 
 1. **统一的目录结构** — 建立清晰的学科目录，便于长期维护：
+
    ```
    错题/
    ├── 数学/
@@ -566,6 +572,7 @@ Smart-Mistake-Lab/
    ```
 
 2. **命名规范** — 图片文件名可包含日期或简短描述，便于搜索：
+
    ```
    2025-01-15_三角形的中线定理.jpg
    20250115_求导_难度 5.png
@@ -579,12 +586,10 @@ Smart-Mistake-Lab/
    - **GPT-4 Vision** — 精准度最高，适合要求严格的学习
    - **Claude 3.5 Sonnet** — 性能均衡，分析稳定
    - **Ollama (LLaVA)** — 免费本地运行，但精准度较低
-
 2. **审核 AI 结果** — AI 有时会：
    - 误读题目中的特殊符号或图形
    - 标签选择不够精准
    - **建议**：完成索引后仔细审查，手动调整不准确的标签
-
 3. **使用学科专属知识点** — 系统已为五大学科内置 100+ 知识点库，确保 AI 分析时选中正确的学科
 
 ### 学习追踪
@@ -605,9 +610,11 @@ Smart-Mistake-Lab/
 ### 启动问题
 
 #### 问题 1：npm 安装失败
+
 **症状**：`npm install` 出错，提示缺少依赖
 
 **解决方案**：
+
 ```bash
 # 清除缓存并重试
 npm cache clean --force
@@ -619,9 +626,11 @@ npm install
 ```
 
 #### 问题 2：Python 依赖不足
+
 **症状**：运行 `uv sync` 或 `python server.py` 出错
 
 **解决方案**：
+
 ```bash
 cd server
 uv sync --upgrade  # 强制更新所有依赖
@@ -629,9 +638,11 @@ cd ..
 ```
 
 #### 问题 3：启动脚本执行失败
+
 **症状**：Windows PowerShell 报错"因为在此系统上禁止运行脚本"
 
 **解决方案**（PowerShell）：
+
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 # 然后重新运行 start.ps1
@@ -641,18 +652,22 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ### 连接问题
 
 #### 问题 4：前端无法连接后端
+
 **症状**：浏览器控制台报错 `Failed to fetch /api/...`
 
 **解决方案**：
+
 1. 检查后端是否正常运行（应输出 `Uvicorn running on http://127.0.0.1:8765`）
 2. 检查防火墙是否阻止了 8765 端口
 3. 确保 `vite.config.js` 中的 API 代理配置正确
 4. 尝试直接访问 `http://127.0.0.1:8765/api/health` 测试后端
 
 #### 问题 5：指定 IP 后无法访问
+
 **症状**：按 `--ip 192.168.1.10` 启动后，访问该 IP 无法连接
 
 **解决方案**：
+
 1. 确认 IP 地址正确（运行 `ipconfig` 或 `ifconfig` 查看本机 IP）
 2. 确保该 IP 确实属于本机网卡（不是网关地址）
 3. 检查防火墙是否允许外部连接到该 IP
@@ -661,9 +676,11 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ### AI 分析问题
 
 #### 问题 6：AI 分析失败或超时
+
 **症状**：点击"AI 分析知识点"后长时间无响应或报错
 
 **解决方案**：
+
 1. 检查 `.env` 文件中的配置是否正确：
    - 图片提取：`IMAGE_ANALYSIS_AI_API_URL`、`IMAGE_ANALYSIS_AI_MODEL`（须支持图片输入）
    - 解题分析：`PROBLEM_AI_API_URL`、`PROBLEM_API_MODEL`
@@ -674,9 +691,11 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 5. 尝试用其他模型或 AI 服务测试
 
 #### 问题 7：AI 分析结果不准确
+
 **症状**：提取的题目内容错误、标签不相关
 
 **解决方案**：
+
 1. 检查上传的图片清晰度和质量（图片过糊或过小会影响识别）
 2. 确保图片中题目明确（避免手写不清晰、拍摄角度歪斜等）
 3. 对于复杂题目，手动检查后编辑标题、内容和标签
@@ -685,18 +704,22 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ### 数据库问题
 
 #### 问题 8：无法索引图片或数据丢失
+
 **症状**：索引后刷新页面数据消失、或报错"数据库锁定"
 
 **解决方案**：
+
 1. 检查 `server/data.db` 文件是否存在且可写
 2. 关闭所有正在访问数据库的进程（停止前端和后端）
 3. 删除 `data.db` 文件重启后端，系统会自动创建新数据库
 4. 查看后端日志获取具体错误信息
 
 #### 问题 9：图片文件无法访问
+
 **症状**：图片缩略图显示失败、或解答图片加载不出来
 
 **解决方案**：
+
 1. 确认图片文件仍存在于原位置（未被移动或删除）
 2. 检查文件权限（特别是在 Linux/macOS 上）
 3. 确认图片路径不包含特殊字符或中文（如必须包含，需正确编码）
@@ -704,9 +727,11 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ### 性能问题
 
 #### 问题 10：应用加载缓慢或卡顿
+
 **症状**：错题库页面加载慢、搜索响应缓慢
 
 **解决方案**：
+
 1. 减少同时显示的题目数量（使用日期范围或标签筛选）
 2. 清理浏览器缓存和 localStorage（开发者工具 → 应用 → 清除数据）
 3. 检查后端日志是否有错误或警告
@@ -715,22 +740,29 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ## ❓ 常见问题
 
 **Q: 如何备份我的错题数据？**
+
 > A: 数据存储在 `server/data.db` 文件中。定期复制此文件作为备份，或通过导出功能（未来版本）生成备份。
 
 **Q: 可以在多台设备上共享数据吗？**
+
 > A: 可以。部署生产版本后，多台设备可通过网络访问同一个后端服务。或将 `server/data.db` 放在共享网络存储上。
 
 **Q: 支持离线使用吗？**
+
 > A: 前端可离线访问（生产构建后），但 AI 分析功能需要网络连接。已索引的数据会缓存在浏览器，但修改需要后端。
 
 **Q: 如何删除所有数据重新开始？**
+
 > A: 删除 `server/data.db` 文件并重启后端，系统会创建新的空数据库。
 
 **Q: 支持哪些图片格式？**
+
 > A: 支持 JPG、PNG、GIF、WebP、BMP 等常见格式。其他格式自动忽略。
 
 **Q: 如何导出数据库中的图片数据做运维检查？**
+
 > A: 可在 `server` 目录下执行下面的命令，将 `images` 表中的 `id`、`file_path`、`title`、`subject` 导出为 `images.csv`：
+
 ```bash
 cd server
 python -c "import sqlite3,csv; conn=sqlite3.connect('data.db'); rows=conn.execute('SELECT id,file_path,title,subject FROM images').fetchall(); open('images.csv','w',newline='',encoding='utf-8-sig').write('id,file_path,title,subject\n' + ''.join([','.join(map(str,r))+'\n' for r in rows]))"
@@ -771,9 +803,8 @@ uv run python server.py
 ## 📞 联系方式与反馈
 
 - 提交 Issue 或 PR：[GitHub Repository](https://github.com/your-repo)
-- 反馈邮箱：wubo0067@hotmail.com
+- 反馈邮箱：<wubo0067@hotmail.com>
 
 ---
 
 **祝你学习进步！🎉**
-
