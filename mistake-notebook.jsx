@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, User } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -229,6 +229,79 @@ const API = {
   }
 };
 
+// ============== 学生切换器（下拉菜单） ==============
+
+// 按学生 id/名字哈希取一个稳定的头像底色
+const STUDENT_AVATAR_COLORS = ['#4C9A8E', '#C74B4B', '#B98A2F', '#5B7FB9', '#9A6FB5', '#B58A5B', '#3E7E8E', '#B05574'];
+function studentAvatarColor(s) {
+  const key = String(s && (s.id != null ? s.id : s.name) || '');
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return STUDENT_AVATAR_COLORS[h % STUDENT_AVATAR_COLORS.length];
+}
+
+function StudentSwitcher({ students, currentStudentId, onSwitch, onManage }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  // 点击外部 / Esc 关闭下拉
+  useEffect(() => {
+    if (!open) return;
+    function onDocDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    function onKey(e) { if (e.key === 'Escape') setOpen(false); }
+    document.addEventListener('mousedown', onDocDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const current = students.find((s) => s.id === currentStudentId) || students[0];
+  if (!current) return null;
+
+  return (
+    <div className={'student-switch' + (open ? ' open' : '')} ref={wrapRef}>
+      <button type="button" className="student-switch-trigger"
+        title="切换学生，错题库/重点练/统计均按学生隔离"
+        aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}>
+        <span className="student-avatar" style={{ background: studentAvatarColor(current) }}>
+          {(current.name || '?').trim().charAt(0)}
+        </span>
+        <span className="student-switch-name">{current.name}</span>
+        <ChevronDown size={14} className="student-switch-chevron" />
+      </button>
+      {open && (
+        <div className="student-switch-menu" role="listbox">
+          <div className="student-switch-menu-title">切换学生</div>
+          {students.map((s) => {
+            const active = s.id === currentStudentId;
+            return (
+              <button key={s.id} type="button" role="option" aria-selected={active}
+                className={'student-switch-item' + (active ? ' active' : '')}
+                onClick={() => { setOpen(false); if (!active) onSwitch(s.id); }}>
+                <span className="student-avatar sm" style={{ background: studentAvatarColor(s) }}>
+                  {(s.name || '?').trim().charAt(0)}
+                </span>
+                <span className="student-switch-item-name">{s.name}</span>
+                {active && <Check size={14} className="student-switch-item-check" />}
+              </button>
+            );
+          })}
+          <div className="student-switch-menu-divider" />
+          <button type="button" className="student-switch-manage"
+            onClick={() => { setOpen(false); onManage(); }}>
+            <Settings size={13} /> 管理学生（添加 / 重命名 / 删除）
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============== CSS ==============
 
 const CSS = `
@@ -280,16 +353,66 @@ const CSS = `
 }
 .mnb h1 .hl { background: linear-gradient(transparent 60%, var(--accent) 60%); padding: 0 2px; }
 .mnb .subtitle { color: var(--ink-soft); font-size: 13px; margin-top: 4px; }
-.mnb .student-switch {
-  display: flex; align-items: center; font-size: 13px; color: var(--ink);
-  background: var(--card); border: 1.5px solid var(--ink); border-radius: 8px;
-  padding: 6px 10px; box-shadow: 0 2px 6px var(--shadow);
+/* 学生切换器：头像胶囊按钮 + 下拉菜单 */
+.mnb .student-switch { position: relative; }
+.mnb .student-switch-trigger {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1.5px solid var(--ink); border-radius: 999px;
+  padding: 4px 12px 4px 4px; cursor: pointer; font-family: inherit; color: var(--ink);
+  box-shadow: 0 2px 6px var(--shadow); transition: all .15s ease;
 }
-.mnb .student-switch select {
+.mnb .student-switch-trigger:hover { transform: translateY(-1px); box-shadow: 0 4px 10px var(--shadow); }
+.mnb .student-switch.open .student-switch-trigger { border-color: var(--accent-2); }
+.mnb .student-avatar {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 13px; font-weight: 700;
+  font-family: "Songti SC", "STSong", serif;
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.18);
+}
+.mnb .student-avatar.sm { width: 22px; height: 22px; font-size: 11px; }
+.mnb .student-switch-name {
   font-family: "Songti SC", "STSong", serif; font-size: 14px; font-weight: 700;
-  border: none; background: transparent; color: var(--ink); cursor: pointer;
-  outline: none; max-width: 140px;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.mnb .student-switch-chevron { color: var(--ink-soft); transition: transform .18s ease; flex-shrink: 0; }
+.mnb .student-switch.open .student-switch-chevron { transform: rotate(180deg); }
+.mnb .student-switch-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 60;
+  min-width: 220px; background: var(--card);
+  border: 1.5px solid var(--ink); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(37, 54, 84, 0.18);
+  padding: 6px; animation: mnb-pop .14s ease;
+}
+@keyframes mnb-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.mnb .student-switch-menu-title {
+  font-size: 11px; color: var(--ink-soft); font-weight: 700; letter-spacing: 1px;
+  padding: 6px 10px 4px;
+}
+.mnb .student-switch-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  padding: 7px 10px; border-radius: 8px; color: var(--ink); text-align: left;
+  transition: background .12s ease;
+}
+.mnb .student-switch-item:hover { background: var(--paper); }
+.mnb .student-switch-item.active { background: rgba(255, 236, 179, 0.45); }
+.mnb .student-switch-item-name {
+  flex: 1; min-width: 0; font-size: 14px; font-weight: 600;
+  font-family: "Songti SC", "STSong", serif;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mnb .student-switch-item.active .student-switch-item-name { font-weight: 700; }
+.mnb .student-switch-item-check { color: var(--accent-2); flex-shrink: 0; }
+.mnb .student-switch-menu-divider { height: 1.5px; background: var(--grid); margin: 6px 4px; }
+.mnb .student-switch-manage {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  border: none; background: none; cursor: pointer; font-family: inherit;
+  padding: 7px 10px; border-radius: 8px; color: var(--ink-soft);
+  font-size: 12.5px; font-weight: 600; text-align: left;
+  transition: all .12s ease;
+}
+.mnb .student-switch-manage:hover { background: var(--paper); color: var(--accent-2); }
 .mnb .tabs { display: flex; gap: 6px; }
 .mnb .tab-btn {
   font-family: "Songti SC", "STSong", serif;
@@ -3376,14 +3499,8 @@ export default function App() {
             <div className="subtitle">目录扫描 · AI 打标签 · 按考点查题</div>
           </div>
           {students.length > 0 && (
-            <div className="student-switch" title="切换学生，错题库/重点练/统计均按学生隔离">
-              <User size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
-              <select value={currentStudentId || ''} onChange={(e) => switchStudent(Number(e.target.value))}>
-                {students.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
+            <StudentSwitcher students={students} currentStudentId={currentStudentId}
+              onSwitch={switchStudent} onManage={() => setTab('config')} />
           )}
           <div className="tabs">
             <button className={'tab-btn' + (tab === 'scan' ? ' active' : '')} onClick={() => setTab('scan')}
