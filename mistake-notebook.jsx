@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, Send, Square, MessageSquare, Upload, Activity, FileText, Link2 } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, Send, Square, MessageSquare, Upload, Activity, FileText, Link2, Images } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -1816,6 +1816,30 @@ const CSS = `
 .mnb .kb-md a { color: var(--accent-2); }
 .mnb .kb-md img { max-width: 100%; border-radius: 6px; }
 
+/* 关联教材原图：缩略图一行（横向滚动），点击放大 + 左右翻页 */
+.mnb .kb-textbook-images { margin-top: 10px; }
+.mnb .kb-textbook-images-head {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 6px;
+}
+.mnb .kb-thumb-strip {
+  display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px;
+  overflow-x: auto; padding-bottom: 6px;
+}
+.mnb .kb-thumb {
+  flex: 0 0 auto; width: 96px; padding: 0; border: 1.5px solid var(--grid);
+  border-radius: 8px; background: var(--card); cursor: zoom-in; overflow: hidden;
+  font-family: inherit; text-align: center;
+}
+.mnb .kb-thumb:hover { border-color: var(--accent-2); box-shadow: 0 2px 8px var(--shadow); }
+.mnb .kb-thumb img {
+  display: block; width: 96px; height: 120px; object-fit: cover; object-position: top;
+}
+.mnb .kb-thumb-label {
+  display: block; font-size: 11px; color: var(--ink-soft); padding: 3px 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
 /* 导入 */
 .mnb .kb-build-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
 .mnb .kb-build-form { flex: 1; min-width: 320px; }
@@ -2404,20 +2428,72 @@ function KbBooks({ health, healthLoading, onRetry }) {
   );
 }
 
+// 把知识库回答末尾的「【教材原图】」区块拆出来：正文 + 图片缩略图列表。
+// sida-agent 的答案 Markdown 以「---」+「## 【教材原图】」+ 若干 **教材第 N 页** /
+// ![..](url) 结尾（见其 storage/image_store.render_image_section）；URL 经后端改写为
+// 指向 sida-agent /pdf_images 静态挂载的绝对地址，浏览器可直接加载。
+const KB_IMAGE_SECTION_RE = /\n-{3,}\s*\n+#{1,6}\s*【教材原图】/;
+function splitKbAnswer(text) {
+  if (!text) return { body: text || '', images: [] };
+  const m = KB_IMAGE_SECTION_RE.exec(text);
+  if (!m) return { body: text, images: [] };
+  const body = text.slice(0, m.index).replace(/\n-{3,}\s*$/, '').trimEnd();
+  const section = text.slice(m.index);
+  const images = [];
+  const imgRe = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let g;
+  while ((g = imgRe.exec(section))) {
+    const alt = (g[1] || '').trim();
+    images.push({ url: g[2], label: alt || `图 ${images.length + 1}` });
+  }
+  return { body, images };
+}
+
 // 单条消息（用户提问 / 知识库回答）的渲染；供轮次分组使用
 function KbMsgNode({ m }) {
+  // 关联教材原图：点缩略图放大，左右方向键 / 箭头翻页（-1 = 预览关闭）
+  const [previewIdx, setPreviewIdx] = useState(-1);
+  const isAssistant = m.role === 'assistant';
+  const split = isAssistant ? splitKbAnswer(m.content) : { body: m.content, images: [] };
+  const images = split.images;
   return (
     <div className={'kb-msg ' + m.role}>
       <div className="kb-msg-role">{m.role === 'user' ? '我' : '知识库'}</div>
-      {m.role === 'assistant' && m.thinking ? (
+      {isAssistant && m.thinking ? (
         <details className="kb-thinking"><summary>思考过程</summary><div>{m.thinking}</div></details>
       ) : null}
-      {m.role === 'assistant'
-        ? <KbMarkdown text={m.content} />
+      {isAssistant
+        ? <KbMarkdown text={split.body} />
         : <div className="kb-msg-user">{m.content}</div>}
       {m._streaming && !m.content && <span className="kb-streaming-hint"><Loader2 size={12} className="spin" /> 生成中…</span>}
+      {isAssistant && images.length > 0 && (
+        <div className="kb-textbook-images">
+          <div className="kb-textbook-images-head">
+            <Images size={13} /> 关联教材原图（{images.length}）· 点击放大，← / → 翻页
+          </div>
+          <div className="kb-thumb-strip">
+            {images.map((im, i) => (
+              <button key={im.url + '#' + i} type="button" className="kb-thumb" title={im.label}
+                onClick={() => setPreviewIdx(i)}>
+                <img src={im.url} alt={im.label} loading="lazy" />
+                <span className="kb-thumb-label">{im.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {m.meta && (m.meta.subject || m.meta.concept) && (
         <div className="kb-msg-meta">学科：{m.meta.subject || '—'}{m.meta.concept ? ` · 概念：${m.meta.concept}` : ''}</div>
+      )}
+      {isAssistant && previewIdx >= 0 && images[previewIdx] && (
+        <ZoomableImagePreview
+          src={images[previewIdx].url}
+          alt={images[previewIdx].label || '教材原图'}
+          images={images.map((im) => im.url)}
+          index={previewIdx}
+          onNavigate={(i) => setPreviewIdx(Math.max(0, Math.min(images.length - 1, i)))}
+          onClose={() => setPreviewIdx(-1)}
+        />
       )}
     </div>
   );
