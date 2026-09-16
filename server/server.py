@@ -23,10 +23,11 @@ from dotenv import load_dotenv
 # 加载项目根目录的 .env 文件
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 import db
 from log import logger
 from llm import (
@@ -184,6 +185,25 @@ def health():
 
 # --- Config ---
 
+# sida-agent HTTP API 服务（知识库）默认地址：见 sida-agent README 3.4
+SIDA_AGENT_DEFAULT_HOST = "127.0.0.1"
+SIDA_AGENT_DEFAULT_PORT = 6173
+
+
+def _sida_agent_base_url() -> str:
+    """从全局配置拼出 sida-agent 服务 base URL（每次实时读取，改配置即生效）。
+
+    host 字段允许直接填完整 URL（如 http://192.168.1.10:8000），此时忽略 port。"""
+    host = (db.get_global_config_value("sida_agent_host") or SIDA_AGENT_DEFAULT_HOST).strip()
+    port_raw = (db.get_global_config_value("sida_agent_port") or "").strip()
+    try:
+        port = int(port_raw) if port_raw else SIDA_AGENT_DEFAULT_PORT
+    except ValueError:
+        port = SIDA_AGENT_DEFAULT_PORT
+    if host.startswith(("http://", "https://")):
+        return host.rstrip("/")
+    return f"http://{host.strip('/')}:{port}"
+
 
 @app.get("/api/students")
 def list_students():
@@ -237,6 +257,8 @@ def get_config():
         "image_dir": db.get_config_value("image_dir") or "",
         "focus_timeout_hours": db.get_focus_timeout_hours(),
         "focus_max_per_subject": db.get_focus_max_per_subject(),
+        "sida_agent_host": db.get_global_config_value("sida_agent_host") or SIDA_AGENT_DEFAULT_HOST,
+        "sida_agent_port": db.get_global_config_value("sida_agent_port") or str(SIDA_AGENT_DEFAULT_PORT),
     }
 
 
@@ -288,6 +310,25 @@ def update_config(data: dict):
                 raise HTTPException(
                     status_code=400, detail="focus_max_per_subject 必须为有效数字"
                 )
+    if "sida_agent_host" in data:
+        val = (data["sida_agent_host"] or "").strip()
+        db.set_global_config_value("sida_agent_host", val or SIDA_AGENT_DEFAULT_HOST)
+        logger.info(f"sida-agent 服务地址已更新：host={val or SIDA_AGENT_DEFAULT_HOST}")
+    if "sida_agent_port" in data:
+        val = data["sida_agent_port"]
+        if val is not None and str(val).strip() != "":
+            try:
+                num = int(val)
+                if num < 1 or num > 65535:
+                    raise ValueError
+                db.set_global_config_value("sida_agent_port", str(num))
+                logger.info(f"sida-agent 服务端口已更新：{num}")
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400, detail="sida_agent_port 必须为 1-65535 的有效端口"
+                )
+        else:
+            db.set_global_config_value("sida_agent_port", str(SIDA_AGENT_DEFAULT_PORT))
     return get_config()
 
 
@@ -1085,6 +1126,207 @@ async def analyze(data: dict):
     except Exception as e:
         logger.exception(f"[API] 分析异常：{file_path}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# --- sida-agent 知识库代理（/api/agent/* → sida-agent HTTP API，见其 README 3.4） ---
+#
+# 前端统一走同源 /api/agent/*，本后端用 httpx 转发到配置的 sida-agent 服务。
+# 优点：host/port 存在本项目配置里、改配置即时生效、不依赖上游 CORS。
+# JSON 端点用普通转发；SSE 端点（chat 消息 / build 进度）用流式逐帧透传。
+# ============================================================================
+
+def _agent_unreachable_detail(base: str) -> str:
+    return f"无法连接 sida-agent 知识库服务（{base}）。请确认已启动：uv run python main.py --stage serve，或在「配置」页检查服务地址。"
+
+
+@app.get("/api/agent/health")
+def agent_health():
+    """连通性测试：转发到 sida-agent /health。"""
+    base = _sida_agent_base_url()
+    try:
+        r = httpx.get(base + "/health", timeout=8.0)
+    except httpx.HTTPError as e:
+        logger.warning(f"[agent] health 连接失败：{e}")
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+def _safe_detail(r) -> object:
+    """尽量把上游错误响应转成可读 detail（保留 dict 结构，供前端展示 409 预估等）。"""
+    try:
+        j = r.json()
+        return j.get("detail", j) if isinstance(j, dict) else j
+    except Exception:
+        return (r.text or f"HTTP {r.status_code}")[:500]
+
+
+@app.get("/api/agent/books")
+def agent_books():
+    base = _sida_agent_base_url()
+    try:
+        r = httpx.get(base + "/books", timeout=30.0)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/chat/sessions")
+def agent_chat_sessions_list():
+    base = _sida_agent_base_url()
+    try:
+        r = httpx.get(base + "/chat/sessions", timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.post("/api/agent/chat/sessions")
+async def agent_chat_sessions_create(request: Request):
+    base = _sida_agent_base_url()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        r = httpx.post(base + "/chat/sessions", json=body, timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/chat/sessions/{session_id}")
+def agent_chat_session_detail(session_id: str):
+    base = _sida_agent_base_url()
+    try:
+        r = httpx.get(base + f"/chat/sessions/{session_id}", timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.post("/api/agent/build/estimate")
+async def agent_build_estimate(request: Request):
+    base = _sida_agent_base_url()
+    body = await request.json()
+    try:
+        r = httpx.post(base + "/build/estimate", json=body, timeout=60.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.post("/api/agent/build")
+async def agent_build_submit(request: Request):
+    base = _sida_agent_base_url()
+    body = await request.json()
+    try:
+        r = httpx.post(base + "/build", json=body, timeout=60.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        # 409 等：detail 常为 dict（含 message/estimate/active_task_id），原样透传
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/build/tasks")
+def agent_build_tasks():
+    base = _sida_agent_base_url()
+    try:
+        r = httpx.get(base + "/build/tasks", timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/build/tasks/{task_id}")
+def agent_build_task_status(task_id: str):
+    base = _sida_agent_base_url()
+    try:
+        r = httpx.get(base + f"/build/tasks/{task_id}", timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+# ---- SSE 透传端点 ----------------------------------------------------------
+
+@app.post("/api/agent/chat/sessions/{session_id}/messages")
+async def agent_chat_message_stream(session_id: str, request: Request):
+    """转发一轮对话并以 SSE 逐帧透传（token/reasoning/result/end）。"""
+    base = _sida_agent_base_url()
+    body = await request.json()
+    body["stream"] = True  # 强制走 SSE
+
+    async def event_stream():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST", base + f"/chat/sessions/{session_id}/messages", json=body
+                ) as upstream:
+                    if upstream.status_code >= 400:
+                        raw = await upstream.aread()
+                        err = {"type": "error", "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}"}
+                        yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+                        yield "event: end\ndata: {}\n\n"
+                        return
+                    # 用 aiter_bytes（已解压）而非 aiter_raw：避免透传 gzip 后丢失 Content-Encoding 头导致前端解不开
+                    async for chunk in upstream.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except httpx.HTTPError:
+            err = {"type": "error", "detail": _agent_unreachable_detail(base)}
+            yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+            yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/agent/build/tasks/{task_id}/events")
+async def agent_build_events_stream(task_id: str, since: int = Query(0, ge=0)):
+    """转发 build 进度 SSE（progress 帧 → 终态 task_status 帧）。"""
+    base = _sida_agent_base_url()
+
+    async def event_stream():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "GET", base + f"/build/tasks/{task_id}/events", params={"since": since}
+                ) as upstream:
+                    if upstream.status_code >= 400:
+                        raw = await upstream.aread()
+                        err = {"type": "error", "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}"}
+                        yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+                        yield "event: end\ndata: {}\n\n"
+                        return
+                    async for chunk in upstream.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except httpx.HTTPError:
+            err = {"type": "error", "detail": _agent_unreachable_detail(base)}
+            yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+            yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # --- Serve frontend static files (production build from dist/) ---

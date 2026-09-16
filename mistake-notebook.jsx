@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, Send, Square, MessageSquare, Upload, Activity, FileText, Link2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -228,6 +232,89 @@ const API = {
     return `/api/image-file?path=${encodeURIComponent(filePath)}${sidQ}`;
   }
 };
+
+// ============== sida-agent 知识库 API（经本后端 /api/agent/* 代理） ==============
+
+const AgentAPI = {
+  async health() { return (await apiFetch('/api/agent/health')).json(); },
+  async books() { return (await apiFetch('/api/agent/books')).json(); },
+  async listSessions() { return (await apiFetch('/api/agent/chat/sessions')).json(); },
+  async createSession(sessionId) {
+    return (await apiFetch('/api/agent/chat/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sessionId ? { session_id: sessionId } : {})
+    })).json();
+  },
+  async getSession(id) { return (await apiFetch(`/api/agent/chat/sessions/${encodeURIComponent(id)}`)).json(); },
+  async buildEstimate(payload) {
+    return (await apiFetch('/api/agent/build/estimate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })).json();
+  },
+  // 提交建库：409 等错误带出结构化 detail（message / estimate / active_task_id）
+  async buildSubmit(payload) {
+    const r = await apiFetch('/api/agent/build', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return r.json();
+  },
+  async buildTasks() { return (await apiFetch('/api/agent/build/tasks')).json(); },
+  async buildTask(id) { return (await apiFetch(`/api/agent/build/tasks/${encodeURIComponent(id)}`)).json(); },
+  buildEventsUrl(id, since = 0) {
+    return `/api/agent/build/tasks/${encodeURIComponent(id)}/events?since=${since}`;
+  }
+};
+
+// 从 apiFetch 抛错的响应里取结构化 detail 的辅助：apiFetch 只把 detail 转成 Error.message，
+// 409 的 dict detail 会被 JSON.stringify 丢信息，因此 build 提交单独走这个函数。
+async function agentBuildSubmitRaw(payload) {
+  const r = await fetch('/api/agent/build', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  let body = null;
+  try { body = await r.json(); } catch (e) { /* ignore */ }
+  return { ok: r.ok, status: r.status, body };
+}
+
+// 手工解析 SSE 流（EventSource 不支持 POST）。逐帧回调 onEvent，收到 event: end 或流关闭即返回。
+// 帧格式：`data: <json>\n\n` 若干 + 收尾 `event: end\ndata: {}\n\n`。
+async function readSSEStream(response, onEvent, signal) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // 按空行切帧（SSE 帧以 \n\n 分隔）
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        let eventName = 'message';
+        const dataLines = [];
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+        }
+        if (eventName === 'end') return;
+        if (dataLines.length === 0) continue;
+        const dataStr = dataLines.join('\n');
+        if (!dataStr) continue;
+        let evt;
+        try { evt = JSON.parse(dataStr); } catch (e) { continue; }
+        onEvent(evt);
+        if (signal && signal.aborted) return;
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch (e) { /* ignore */ }
+  }
+}
 
 // ============== 学生切换器（下拉菜单） ==============
 
@@ -1607,6 +1694,170 @@ const CSS = `
   .mnb .similar-item-thumb { width: 100%; height: 200px; min-width: 0; }
   .mnb .similar-item-side { border-left: none; padding-left: 0; justify-content: flex-start; }
 }
+
+/* ============ 知识库（sida-agent） ============ */
+.mnb input[type="number"], .mnb input[type="password"], .mnb select {
+  border-bottom: 1.5px solid var(--grid);
+}
+.mnb .kb-head {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.mnb .kb-subtabs { display: flex; gap: 6px; }
+.mnb .kb-subtab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 14px; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid var(--grid); background: var(--paper); color: var(--ink-soft);
+  font-size: 13.5px; font-weight: 700; font-family: inherit;
+}
+.mnb .kb-subtab.active { border-color: var(--ink); background: var(--ink); color: #fff; }
+.mnb .kb-subtab:hover:not(.active) { border-color: var(--ink-soft); }
+
+.mnb .kb-banner {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px;
+  border: 1.5px solid var(--grid);
+}
+.mnb .kb-banner.ok { color: #1f8a55; background: #E9F7EF; border-color: #bfe4cd; }
+.mnb .kb-banner.error { color: var(--margin); background: #FBECEC; border-color: #e6bcbc; }
+.mnb .kb-banner.info { color: var(--ink-soft); background: #F1F2F5; }
+.mnb .kb-banner-retry {
+  margin-left: 6px; border: none; background: none; color: inherit; cursor: pointer;
+  font-weight: 700; text-decoration: underline; font-family: inherit; font-size: 12.5px;
+}
+
+.mnb .kb-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;
+}
+.mnb .kb-toolbar-title { font-size: 14px; font-weight: 700; color: var(--ink); }
+.mnb .kb-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 13px; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink);
+  font-size: 13px; font-weight: 700; font-family: inherit;
+}
+.mnb .kb-btn:hover:not(:disabled) { background: var(--ink); color: #fff; }
+.mnb .kb-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.mnb .kb-btn.primary { border-color: var(--accent-2); background: var(--accent-2); color: #fff; }
+.mnb .kb-btn.primary:hover:not(:disabled) { filter: brightness(0.94); background: var(--accent-2); color: #fff; }
+.mnb .kb-btn.stop { border-color: var(--margin); color: var(--margin); }
+.mnb .kb-btn.stop:hover:not(:disabled) { background: var(--margin); color: #fff; }
+.mnb .kb-link-btn {
+  border: none; background: none; color: var(--ink-soft); cursor: pointer;
+  font-size: 12.5px; font-weight: 600; font-family: inherit; padding: 2px 0;
+}
+.mnb .kb-link-btn:hover { color: var(--ink); }
+
+/* 教材清单 */
+.mnb .kb-books-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 4px; }
+.mnb .kb-book-card {
+  border: 1.5px solid var(--grid); border-radius: 10px; padding: 14px 16px; background: var(--card);
+}
+.mnb .kb-book-name { font-size: 14.5px; font-weight: 700; color: var(--ink); margin-bottom: 6px; word-break: break-all; }
+.mnb .kb-book-id { font-size: 11.5px; color: var(--ink-soft); font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 对话 */
+.mnb .kb-chat-layout { display: flex; gap: 16px; align-items: stretch; height: calc(100vh - 240px); min-height: 520px; }
+.mnb .kb-sessions { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px dashed var(--grid); padding-right: 16px; }
+.mnb .kb-session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.mnb .kb-session-item {
+  padding: 9px 10px; border-radius: 8px; cursor: pointer; border: 1.5px solid transparent;
+}
+.mnb .kb-session-item:hover { background: var(--paper); }
+.mnb .kb-session-item.active { border-color: var(--ink); background: var(--paper); }
+.mnb .kb-session-title { font-size: 13px; font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mnb .kb-session-meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.mnb .kb-chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.mnb .kb-messages { flex: 1; overflow-y: auto; padding: 4px 2px 12px; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.mnb .kb-turn {
+  position: relative; display: flex; flex-direction: column; gap: 14px;
+  padding-top: 22px; border-top: 2px dashed var(--grid);
+}
+.mnb .kb-turn:first-child { padding-top: 0; border-top: none; }
+.mnb .kb-turn-label {
+  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+  background: #EAF4F1; border: 1.5px solid var(--accent-2); border-radius: 999px;
+  padding: 1px 14px; font-size: 11.5px; font-weight: 800; color: #237a6c;
+  letter-spacing: 1px; white-space: nowrap;
+}
+.mnb .kb-msg { display: flex; flex-direction: column; }
+.mnb .kb-msg-role { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); margin-bottom: 4px; }
+.mnb .kb-msg.user .kb-msg-role { color: var(--accent-2); }
+.mnb .kb-msg-user { font-size: 14px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; }
+.mnb .kb-msg.assistant { align-self: stretch; }
+.mnb .kb-msg.assistant .kb-md { font-size: 14px; line-height: 1.7; color: var(--ink); }
+.mnb .kb-thinking { margin-bottom: 6px; font-size: 12px; color: var(--ink-soft); }
+.mnb .kb-thinking summary { cursor: pointer; font-weight: 600; }
+.mnb .kb-thinking > div { margin-top: 4px; padding: 6px 8px; background: var(--paper); border-radius: 6px; white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
+.mnb .kb-streaming-hint { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+.mnb .kb-msg-meta { font-size: 11.5px; color: var(--ink-soft); margin-top: 6px; }
+.mnb .kb-composer { display: flex; gap: 10px; align-items: flex-end; border-top: 1px dashed var(--grid); padding-top: 12px; margin-top: 8px; flex-shrink: 0; }
+.mnb .kb-input {
+  flex: 1; min-height: 60px;
+  border: 2px solid var(--ink); border-bottom-width: 2px; border-radius: 10px;
+  background: #fff; padding: 10px 12px; resize: vertical;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.mnb .kb-input:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(76, 154, 142, 0.15); }
+.mnb .kb-input::placeholder { color: #a8b0bd; }
+
+/* Markdown 内容 */
+.mnb .kb-md > *:first-child { margin-top: 0; }
+.mnb .kb-md > *:last-child { margin-bottom: 0; }
+.mnb .kb-md p { margin: 0 0 8px; }
+.mnb .kb-md h1, .mnb .kb-md h2, .mnb .kb-md h3 { margin: 12px 0 6px; font-size: 15px; }
+.mnb .kb-md ul, .mnb .kb-md ol { margin: 0 0 8px; padding-left: 22px; }
+.mnb .kb-md li { margin: 2px 0; }
+.mnb .kb-md code { background: var(--paper); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; font-family: monospace; }
+.mnb .kb-md pre { background: var(--paper); padding: 10px 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 8px; }
+.mnb .kb-md pre code { background: none; padding: 0; }
+.mnb .kb-md blockquote { border-left: 3px solid var(--grid); margin: 0 0 8px; padding: 2px 12px; color: var(--ink-soft); }
+.mnb .kb-md table { border-collapse: collapse; margin: 0 0 8px; font-size: 13px; }
+.mnb .kb-md th, .mnb .kb-md td { border: 1px solid var(--grid); padding: 5px 9px; }
+.mnb .kb-md a { color: var(--accent-2); }
+.mnb .kb-md img { max-width: 100%; border-radius: 6px; }
+
+/* 导入 */
+.mnb .kb-build-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.mnb .kb-build-form { flex: 1; min-width: 320px; }
+.mnb .kb-build-progress { flex: 1; min-width: 320px; border-left: 1px dashed var(--grid); padding-left: 20px; }
+.mnb .kb-estimate { margin-top: 14px; border: 1.5px solid var(--grid); border-radius: 10px; padding: 12px 14px; background: var(--paper); }
+.mnb .kb-estimate-title { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); margin-bottom: 8px; }
+.mnb .kb-estimate-grid { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--ink); }
+.mnb .kb-estimate-grid b { color: var(--margin); }
+.mnb .kb-estimate-total { width: 100%; margin-top: 4px; }
+.mnb .kb-hint { font-size: 12px; color: #a97f12; margin-top: 8px; }
+.mnb .kb-notice { font-size: 12.5px; color: var(--accent-2); margin-top: 10px; font-weight: 600; }
+.mnb .kb-status-line { font-size: 13px; margin-bottom: 10px; }
+.mnb .kb-status-badge {
+  display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 10px;
+  border: 1.5px solid currentColor; text-transform: uppercase;
+}
+.mnb .kb-status-badge.running { color: #3b6cc4; background: #EAF1FC; }
+.mnb .kb-status-badge.queued { color: #7b8494; background: #F1F2F5; }
+.mnb .kb-status-badge.done { color: #1f8a55; background: #E9F7EF; }
+.mnb .kb-status-badge.failed { color: var(--margin); background: #FBECEC; }
+.mnb .kb-status-badge.cancelled { color: #a97f12; background: #FBF3DC; }
+.mnb .kb-progress { margin-bottom: 12px; }
+.mnb .kb-progress-head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-soft); margin-bottom: 4px; }
+.mnb .kb-progress-track { height: 8px; border-radius: 999px; background: var(--grid); overflow: hidden; }
+.mnb .kb-progress-fill { height: 100%; background: var(--accent-2); border-radius: 999px; transition: width 0.3s ease; }
+.mnb .kb-progress-fill.active { background: linear-gradient(90deg, var(--accent-2), #6fb8ac); }
+.mnb .kb-log { margin-top: 12px; max-height: 260px; overflow-y: auto; background: #2b2b2b; border-radius: 8px; padding: 10px 12px; }
+.mnb .kb-log-line { font-family: monospace; font-size: 11.5px; color: #d7d7d7; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.mnb .kb-tasks-history { margin-top: 8px; }
+.mnb .kb-task-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px;
+}
+.mnb .kb-task-row:hover { background: var(--paper); }
+.mnb .kb-task-id { font-family: monospace; color: var(--ink-soft); flex-shrink: 0; }
+.mnb .kb-task-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.mnb .kb-task-time { color: var(--ink-soft); flex-shrink: 0; }
+@media (max-width: 720px) {
+  .mnb .kb-chat-layout { flex-direction: column; height: auto; min-height: 0; }
+  .mnb .kb-messages { max-height: 60vh; }
+  .mnb .kb-sessions { width: 100%; border-right: none; padding-right: 0; border-bottom: 1px dashed var(--grid); padding-bottom: 12px; max-height: 200px; }
+  .mnb .kb-build-progress { border-left: none; padding-left: 0; border-top: 1px dashed var(--grid); padding-top: 16px; }
+}
 `;
 
 // ============== TAG PILL (with inline editing) ==============
@@ -2070,6 +2321,565 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
   );
 }
 
+// ============== 知识库 tab（sida-agent 集成） ==============
+
+const KB_SUBJECTS = [
+  { value: 'physics', label: '物理' },
+  { value: 'chemistry', label: '化学' },
+  { value: 'math', label: '数学' },
+];
+
+// Markdown + LaTeX 公式渲染（sida-agent 回答含 $...$ / $$...$$ 与来源标注）
+function KbMarkdown({ text }) {
+  return (
+    <div className="kb-md">
+      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {text || ''}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function KbServiceBanner({ health, healthLoading, onRetry }) {
+  if (healthLoading) {
+    return <div className="kb-banner info"><Loader2 size={14} className="spin" /> 正在连接知识库服务…</div>;
+  }
+  if (health && health.error) {
+    return (
+      <div className="kb-banner error">
+        <AlertCircle size={14} /> {health.error}
+        <button className="kb-banner-retry" onClick={onRetry}>重试</button>
+      </div>
+    );
+  }
+  if (health) {
+    return (
+      <div className="kb-banner ok">
+        <Link2 size={14} /> 已连接 · 图谱 {health.graph_nodes} 节点 / 向量 {health.vector_count} 条
+      </div>
+    );
+  }
+  return null;
+}
+
+// ---- 子视图①：教材清单 ----
+function KbBooks({ health, healthLoading, onRetry }) {
+  const [books, setBooks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function load() {
+    setLoading(true); setError('');
+    try {
+      const data = await AgentAPI.books();
+      setBooks(data.books || []);
+    } catch (e) {
+      setError(e.message || '加载失败'); setBooks([]);
+    } finally { setLoading(false); }
+  }
+  useEffect(() => { if (health && !health.error) load(); }, [health]);
+
+  return (
+    <div>
+      <div className="kb-toolbar">
+        <span className="kb-toolbar-title">入库教材（{books.length}）</span>
+        <button className="kb-btn" onClick={() => { onRetry && onRetry(); load(); }} disabled={loading || healthLoading}>
+          {loading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} 刷新
+        </button>
+      </div>
+      {error && <div className="save-msg error" style={{ marginTop: 8 }}>{error}</div>}
+      {!error && !loading && books.length === 0 && (
+        <div className="empty"><BookOpen size={36} /><p>知识库中暂无教材</p>
+          <p style={{ fontSize: 13 }}>到「导入」子页把教材 PDF 灌入知识库</p></div>
+      )}
+      <div className="kb-books-grid">
+        {books.map((b) => (
+          <div key={b.pdf_id} className="kb-book-card">
+            <div className="kb-book-name"><BookOpen size={15} style={{ verticalAlign: -2, marginRight: 5 }} />{b.name}</div>
+            <div className="kb-book-id" title={b.pdf_id}>pdf_id: {b.pdf_id}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 单条消息（用户提问 / 知识库回答）的渲染；供轮次分组使用
+function KbMsgNode({ m }) {
+  return (
+    <div className={'kb-msg ' + m.role}>
+      <div className="kb-msg-role">{m.role === 'user' ? '我' : '知识库'}</div>
+      {m.role === 'assistant' && m.thinking ? (
+        <details className="kb-thinking"><summary>思考过程</summary><div>{m.thinking}</div></details>
+      ) : null}
+      {m.role === 'assistant'
+        ? <KbMarkdown text={m.content} />
+        : <div className="kb-msg-user">{m.content}</div>}
+      {m._streaming && !m.content && <span className="kb-streaming-hint"><Loader2 size={12} className="spin" /> 生成中…</span>}
+      {m.meta && (m.meta.subject || m.meta.concept) && (
+        <div className="kb-msg-meta">学科：{m.meta.subject || '—'}{m.meta.concept ? ` · 概念：${m.meta.concept}` : ''}</div>
+      )}
+    </div>
+  );
+}
+
+// ---- 子视图②：多轮对话（SSE 流式） ----
+function KbChat({ health, healthLoading }) {
+  const serviceDown = health && health.error;
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [currentId, setCurrentId] = useState('');
+  const [messages, setMessages] = useState([]);   // {role:'user'|'assistant', content, thinking}
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState('');
+  const abortRef = useRef(null);
+  const scrollRef = useRef(null);
+
+  async function loadSessions() {
+    setSessionsLoading(true);
+    try {
+      const data = await AgentAPI.listSessions();
+      setSessions(data.sessions || []);
+    } catch (e) { /* 服务未就绪时静默 */ }
+    finally { setSessionsLoading(false); }
+  }
+  useEffect(() => { if (!serviceDown) loadSessions(); }, [serviceDown]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, streaming]);
+
+  async function openSession(id) {
+    if (streaming) return;
+    setCurrentId(id); setError('');
+    if (!id) { setMessages([]); return; }
+    try {
+      const data = await AgentAPI.getSession(id);
+      setMessages((data.messages || []).map((m) => ({
+        role: m.role === 'human' ? 'user' : 'assistant', content: m.content
+      })));
+    } catch (e) { setMessages([]); setError(e.message || '读取会话失败'); }
+  }
+
+  async function newSession() {
+    if (streaming) return;
+    try {
+      const data = await AgentAPI.createSession();
+      const id = data.thread_id;
+      setSessions((s) => [{ thread_id: id, first_question: '（新会话）', turns: 0, updated_at: '' }, ...s]);
+      setCurrentId(id); setMessages([]); setError('');
+    } catch (e) { setError(e.message || '新建会话失败'); }
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || streaming) return;
+    setError('');
+    // 懒创建会话
+    let sid = currentId;
+    if (!sid) {
+      try { const d = await AgentAPI.createSession(); sid = d.thread_id; setCurrentId(sid); }
+      catch (e) { setError(e.message || '无法创建会话'); return; }
+    }
+    setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: text }, { role: 'assistant', content: '', thinking: '', _streaming: true }]);
+    setStreaming(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    let acc = ''; let think = '';
+    try {
+      const resp = await fetch(`/api/agent/chat/sessions/${encodeURIComponent(sid)}/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, stream: true }), signal: ctrl.signal
+      });
+      if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status} ${t.slice(0, 200)}`);
+      }
+      await readSSEStream(resp, (evt) => {
+        if (evt.type === 'token') { acc += evt.text || ''; patchLast({ content: acc }); }
+        else if (evt.type === 'reasoning') { think += evt.text || ''; patchLast({ thinking: think }); }
+        else if (evt.type === 'result') {
+          const r = evt.data || {};
+          if (r.reply) acc = r.reply;
+          patchLast({ content: acc, _streaming: false, meta: { subject: r.target_subject, concept: r.target_concept, answer_path: r.answer_path } });
+        }
+        else if (evt.type === 'error') { setError(evt.detail || '流式返回错误'); patchLast({ _streaming: false }); }
+      }, ctrl.signal);
+    } catch (e) {
+      if (e.name !== 'AbortError') setError(e.message || '对话请求失败');
+    } finally {
+      patchLast({ _streaming: false });
+      setStreaming(false); abortRef.current = null;
+      loadSessions();
+    }
+    function patchLast(patch) {
+      setMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const next = prev.slice();
+        next[next.length - 1] = { ...next[next.length - 1], ...patch };
+        return next;
+      });
+    }
+  }
+
+  function stop() { if (abortRef.current) abortRef.current.abort(); }
+
+  if (serviceDown) {
+    return <div className="empty"><AlertCircle size={36} /><p>知识库服务未连接</p>
+      <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{health.error}</p></div>;
+  }
+
+  return (
+    <div className="kb-chat-layout">
+      <div className="kb-sessions">
+        <div className="kb-toolbar">
+          <span className="kb-toolbar-title">会话</span>
+          <button className="kb-btn" onClick={newSession} disabled={streaming}><Plus size={14} /> 新建</button>
+        </div>
+        {sessionsLoading && <div style={{ padding: 10, color: 'var(--ink-soft)', fontSize: 13 }}><Loader2 size={14} className="spin" /> 加载中…</div>}
+        <div className="kb-session-list">
+          {sessions.map((s) => (
+            <div key={s.thread_id} className={'kb-session-item' + (s.thread_id === currentId ? ' active' : '')}
+              onClick={() => openSession(s.thread_id)} title={s.thread_id}>
+              <div className="kb-session-title">{s.first_question || s.thread_id}</div>
+              <div className="kb-session-meta">{s.turns || 0} 轮 · {formatTime(s.updated_at)}</div>
+            </div>
+          ))}
+          {!sessionsLoading && sessions.length === 0 && (
+            <div style={{ padding: '10px 8px', fontSize: 12.5, color: 'var(--ink-soft)' }}>暂无会话，点「新建」开始</div>
+          )}
+        </div>
+      </div>
+
+      <div className="kb-chat-main">
+        <div className="kb-messages" ref={scrollRef}>
+          {messages.length === 0 && (
+            <div className="empty" style={{ padding: '40px 20px' }}><MessageSquare size={34} />
+              <p>选择或新建一个会话，向知识库提问</p>
+              <p style={{ fontSize: 13 }}>答案可溯源到教材页码，支持公式与教材原图</p></div>
+          )}
+          {(() => {
+            // 按「用户提问 + 知识库回答」分轮，轮与轮之间用分隔线明显隔开
+            const turns = [];
+            messages.forEach((m) => {
+              if (m.role === 'user') turns.push({ user: m, assistant: null });
+              else if (turns.length && !turns[turns.length - 1].assistant) turns[turns.length - 1].assistant = m;
+              else turns.push({ user: null, assistant: m });
+            });
+            return turns.map((t, ti) => (
+              <div key={ti} className="kb-turn">
+                {turns.length > 1 && <div className="kb-turn-label">第 {ti + 1} 轮</div>}
+                {t.user && <KbMsgNode m={t.user} />}
+                {t.assistant && <KbMsgNode m={t.assistant} />}
+              </div>
+            ));
+          })()}
+        </div>
+        {error && <div className="save-msg error" style={{ margin: '0 12px 8px' }}>{error}</div>}
+        <div className="kb-composer">
+          <textarea className="kb-input" value={input} rows={3}
+            placeholder="输入问题，Enter 发送 / Shift+Enter 换行"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+          {streaming
+            ? <button className="kb-btn stop" onClick={stop}><Square size={14} /> 停止</button>
+            : <button className="kb-btn primary" onClick={send} disabled={!input.trim()}><Send size={14} /> 发送</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- 子视图③：导入（build 异步任务 + SSE 进度） ----
+function KbBuild({ health, healthLoading }) {
+  const serviceDown = health && health.error;
+  const [pdf, setPdf] = useState('');
+  const [book, setBook] = useState('');
+  const [startPage, setStartPage] = useState('1');
+  const [endPage, setEndPage] = useState('12');
+  const [subject, setSubject] = useState('physics');
+  const [maxNewCalls, setMaxNewCalls] = useState('');
+  const [maxChunks, setMaxChunks] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const [estimating, setEstimating] = useState(false);
+  const [estimate, setEstimate] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const [taskId, setTaskId] = useState('');
+  const [taskStatus, setTaskStatus] = useState('');   // queued/running/done/failed
+  const [prog, setProg] = useState({ visionDone: 0, visionTotal: 0, extractDone: 0, extractTotal: 0, stage: '', logs: [] });
+  const abortRef = useRef(null);
+  const [tasks, setTasks] = useState([]);
+
+  const buildPayload = (confirm) => {
+    const p = {
+      pdf: pdf.trim(),
+      startPage: parseInt(startPage, 10) || 1,
+      endPage: parseInt(endPage, 10) || 1,
+      subject,
+    };
+    if (book.trim()) p.book = book.trim();
+    if (maxNewCalls.trim()) p.maxNewCalls = parseInt(maxNewCalls, 10);
+    if (maxChunks.trim()) p.maxChunks = parseInt(maxChunks, 10);
+    if (confirm !== undefined) p.confirm = confirm;
+    return p;
+  };
+
+  async function doEstimate() {
+    if (!pdf.trim()) { setError('请先填写教材 PDF 路径'); return; }
+    setEstimating(true); setError(''); setEstimate(null);
+    try { setEstimate(await AgentAPI.buildEstimate(buildPayload())); }
+    catch (e) { setError(e.message || '预估失败'); }
+    finally { setEstimating(false); }
+  }
+
+  async function loadTasks() {
+    try { const d = await AgentAPI.buildTasks(); setTasks((d.tasks || []).slice().reverse()); }
+    catch (e) { /* ignore */ }
+  }
+  useEffect(() => { if (!serviceDown) loadTasks(); }, [serviceDown]);
+
+  async function doSubmit() {
+    if (!pdf.trim()) { setError('请先填写教材 PDF 路径'); return; }
+    setSubmitting(true); setError(''); setNotice('');
+    const res = await agentBuildSubmitRaw(buildPayload(true));
+    setSubmitting(false);
+    if (res.ok) {
+      const t = res.body;
+      setNotice(`建库任务已提交：${t.task_id}（${t.status}）`);
+      subscribe(t.task_id);
+      loadTasks();
+    } else if (res.status === 409) {
+      const detail = (res.body && res.body.detail) || {};
+      if (detail.active_task_id) {
+        setNotice('已有建库任务在执行，已切换到该任务的进度：' + detail.active_task_id);
+        subscribe(detail.active_task_id);
+      } else {
+        setError(detail.message || '提交被拒绝（409）：' + JSON.stringify(detail));
+      }
+    } else {
+      const detail = (res.body && res.body.detail);
+      setError(typeof detail === 'string' ? detail : (detail && detail.message) || `提交失败 HTTP ${res.status}`);
+    }
+  }
+
+  function logLine(evt) {
+    const bits = [];
+    if (evt.stage === 'vision') {
+      if (evt.event === 'start') bits.push(`视觉提取开始：${evt.pdf_name || ''} 第 ${evt.start_page}-${evt.end_page} 页（共 ${evt.total_pages} 页）`);
+      else if (evt.event === 'page_done') { bits.push(`视觉提取 ${evt.done}/${evt.total_pages} 页${evt.cached ? '（缓存）' : ''}`); setProg((p) => ({ ...p, visionDone: evt.done, visionTotal: evt.total_pages, stage: 'vision' })); }
+      else if (evt.event === 'capped') bits.push(`视觉提取达上限停止（max_new_calls=${evt.max_new_calls}）`);
+      else if (evt.event === 'vision_done') bits.push(`视觉提取完成：${evt.processed_pages} 页，新调用 ${evt.new_vision_calls} 次`);
+    } else if (evt.stage === 'extract') {
+      if (evt.event === 'plan') { bits.push(`切分为 ${evt.total_chunks} 个子块`); setProg((p) => ({ ...p, extractTotal: evt.total_chunks })); }
+      else if (evt.event === 'chunk_start') bits.push(`子块 ${evt.chunk}/${evt.total_chunks} 开始${evt.cached ? '（缓存命中）' : ''}：${evt.label || ''}`);
+      else if (evt.event === 'chunk_done') { bits.push(`子块 ${evt.chunk}/${evt.total_chunks} 完成：写入 ${evt.docs} 切片，图节点 ${evt.nodes}`); setProg((p) => ({ ...p, extractDone: evt.chunk, extractTotal: evt.total_chunks, stage: 'extract' })); }
+      else if (evt.event === 'build_done') bits.push(`抽取入库完成：新抽取 ${evt.new_chunks} 子块，向量 ${evt.docs} 条，图节点 ${evt.nodes}`);
+    } else if (evt.stage === 'task') {
+      if (evt.event === 'summary') bits.push('任务汇总完成');
+    }
+    return bits;
+  }
+
+  async function subscribe(id) {
+    setTaskId(id); setTaskStatus('running');
+    setProg({ visionDone: 0, visionTotal: 0, extractDone: 0, extractTotal: 0, stage: '', logs: [] });
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      const resp = await fetch(AgentAPI.buildEventsUrl(id, 0), { signal: ctrl.signal });
+      if (!resp.ok) { const t = await resp.text().catch(() => ''); setError(`进度订阅失败 HTTP ${resp.status} ${t.slice(0, 200)}`); return; }
+      await readSSEStream(resp, (evt) => {
+        if (evt.type === 'progress') {
+          const lines = logLine(evt);
+          if (lines.length) setProg((p) => ({ ...p, logs: [...p.logs, ...lines].slice(-200) }));
+        } else if (evt.type === 'task_status') {
+          setTaskStatus(evt.status);
+          if (evt.error) setError('建库失败：' + evt.error);
+          if (evt.result) {
+            const r = evt.result;
+            setProg((p) => ({ ...p, logs: [...p.logs, `✅ 完成：${r.pages} 页 / 图节点 ${r.nodes} / 视觉调用 ${r.vision_calls} / 推理调用 ${r.reasoning_calls}`].slice(-200) }));
+          }
+          loadTasks();
+        } else if (evt.type === 'error') { setError(evt.detail || '进度流错误'); }
+      }, ctrl.signal);
+    } catch (e) {
+      if (e.name !== 'AbortError') setError(e.message || '进度订阅中断');
+    }
+  }
+
+  function unsubscribe() { if (abortRef.current) abortRef.current.abort(); }
+
+  const visionPct = prog.visionTotal ? Math.round(prog.visionDone / prog.visionTotal * 100) : 0;
+  const extractPct = prog.extractTotal ? Math.round(prog.extractDone / prog.extractTotal * 100) : 0;
+  const running = taskStatus === 'running' || taskStatus === 'queued';
+
+  if (serviceDown) {
+    return <div className="empty"><AlertCircle size={36} /><p>知识库服务未连接</p>
+      <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{health.error}</p></div>;
+  }
+
+  return (
+    <div className="kb-build-layout">
+      <div className="kb-build-form">
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label className="field-label">教材 PDF 路径</label>
+          <input type="text" value={pdf} onChange={(e) => setPdf(e.target.value)} placeholder="例如：D:\教材\物理9S.pdf" />
+        </div>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div className="field" style={{ flex: 2, minWidth: 160 }}>
+            <label className="field-label">教材显示名（可选）</label>
+            <input type="text" value={book} onChange={(e) => setBook(e.target.value)} placeholder="缺省取文件名" />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: 90 }}>
+            <label className="field-label">起始页</label>
+            <input type="number" min={1} value={startPage} onChange={(e) => setStartPage(e.target.value)} />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: 90 }}>
+            <label className="field-label">结束页</label>
+            <input type="number" min={1} value={endPage} onChange={(e) => setEndPage(e.target.value)} />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: 100 }}>
+            <label className="field-label">学科</label>
+            <select value={subject} onChange={(e) => setSubject(e.target.value)} style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--grid)', borderRadius: 8, background: '#fff', fontFamily: 'inherit', fontSize: 14 }}>
+              {KB_SUBJECTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <button className="kb-link-btn" onClick={() => setShowAdvanced((v) => !v)}>{showAdvanced ? '▾' : '▸'} 高级选项（控成本）</button>
+          {showAdvanced && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+              <div className="field" style={{ flex: 1, minWidth: 150 }}>
+                <label className="field-label">本批视觉新调用上限</label>
+                <input type="number" min={0} value={maxNewCalls} onChange={(e) => setMaxNewCalls(e.target.value)} placeholder="留空=不限" />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 150 }}>
+                <label className="field-label">本次处理新子块上限</label>
+                <input type="number" min={0} value={maxChunks} onChange={(e) => setMaxChunks(e.target.value)} placeholder="留空=不限" />
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="kb-btn" onClick={doEstimate} disabled={estimating || submitting}>
+            {estimating ? <Loader2 size={14} className="spin" /> : <Activity size={14} />} 规模预估
+          </button>
+          <button className="kb-btn primary" onClick={doSubmit} disabled={submitting || estimating}>
+            {submitting ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} 确认导入
+          </button>
+        </div>
+        {estimate && (
+          <div className="kb-estimate">
+            <div className="kb-estimate-title">规模预估（0 模型调用）</div>
+            <div className="kb-estimate-grid">
+              <span>页区间 <b>{estimate.range_pages}</b></span>
+              <span>已缓存页 <b>{estimate.cached_pages}</b></span>
+              <span>新增视觉调用 <b>{estimate.new_vision_calls}</b></span>
+              <span>新子块 <b>{estimate.new_chunks}</b>（缓存 {estimate.cached_chunks}）</span>
+              <span className="kb-estimate-total">预估新增模型调用 <b>{estimate.new_calls_total}</b> 次</span>
+            </div>
+            {estimate.new_calls_total > 0 && <div className="kb-hint">⚠️「确认导入」将产生约 {estimate.new_calls_total} 次模型调用（会消耗 API 额度）。</div>}
+          </div>
+        )}
+        {notice && <div className="kb-notice">{notice}</div>}
+        {error && <div className="save-msg error" style={{ marginTop: 8 }}>{error}</div>}
+      </div>
+
+      <div className="kb-build-progress">
+        <div className="kb-toolbar">
+          <span className="kb-toolbar-title">导入进度{taskId ? ` · ${taskId}` : ''}</span>
+          {running && <button className="kb-btn" onClick={unsubscribe}><Square size={14} /> 断开订阅</button>}
+        </div>
+        {!taskId && <div style={{ fontSize: 13, color: 'var(--ink-soft)', padding: '8px 0' }}>提交导入后在这里显示逐页 / 逐子块进度。</div>}
+        {taskId && (
+          <div>
+            <div className="kb-status-line">状态：<span className={'kb-status-badge ' + taskStatus}>{taskStatus}</span></div>
+            <KbProgressBar label="视觉提取" done={prog.visionDone} total={prog.visionTotal} pct={visionPct} active={prog.stage === 'vision' && running} />
+            <KbProgressBar label="抽取入库" done={prog.extractDone} total={prog.extractTotal} pct={extractPct} active={prog.stage === 'extract' && running} />
+            {prog.logs.length > 0 && (
+              <div className="kb-log">
+                {prog.logs.map((l, i) => <div key={i} className="kb-log-line">{l}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+        {tasks.length > 0 && (
+          <div className="kb-tasks-history">
+            <div className="kb-toolbar-title" style={{ margin: '14px 0 6px' }}>任务历史</div>
+            {tasks.map((t) => (
+              <div key={t.task_id} className="kb-task-row" onClick={() => subscribe(t.task_id)} title="点击查看进度">
+                <span className={'kb-status-badge ' + t.status}>{t.status}</span>
+                <span className="kb-task-id">{t.task_id}</span>
+                <span className="kb-task-name">{(t.params && (t.params.book || (t.params.pdf || '').split(/[\\/]/).pop())) || ''}</span>
+                <span className="kb-task-time">{formatTime(t.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KbProgressBar({ label, done, total, pct, active }) {
+  return (
+    <div className="kb-progress">
+      <div className="kb-progress-head">
+        <span>{label}</span>
+        <span>{total ? `${done}/${total}` : (active ? '准备中…' : '—')}</span>
+      </div>
+      <div className="kb-progress-track">
+        <div className={'kb-progress-fill' + (active ? ' active' : '')} style={{ width: (total ? pct : 0) + '%' }} />
+      </div>
+    </div>
+  );
+}
+
+// ---- 知识库 tab 容器 ----
+function KnowledgeBaseTab() {
+  const [sub, setSub] = useState('chat');
+  const [health, setHealth] = useState(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+
+  async function checkHealth() {
+    setHealthLoading(true);
+    try { setHealth(await AgentAPI.health()); }
+    catch (e) { setHealth({ error: e.message || '无法连接知识库服务' }); }
+    finally { setHealthLoading(false); }
+  }
+  useEffect(() => { checkHealth(); }, []);
+
+  const subs = [
+    { key: 'books', label: '教材', icon: <BookOpen size={14} /> },
+    { key: 'chat', label: '对话', icon: <MessageSquare size={14} /> },
+    { key: 'build', label: '导入', icon: <Upload size={14} /> },
+  ];
+
+  return (
+    <div className="panel">
+      <div className="kb-head">
+        <div className="kb-subtabs">
+          {subs.map((s) => (
+            <button key={s.key} className={'kb-subtab' + (sub === s.key ? ' active' : '')} onClick={() => setSub(s.key)}>
+              {s.icon} {s.label}
+            </button>
+          ))}
+        </div>
+        <KbServiceBanner health={health} healthLoading={healthLoading} onRetry={checkHealth} />
+      </div>
+      {sub === 'books' && <KbBooks health={health} healthLoading={healthLoading} onRetry={checkHealth} />}
+      {sub === 'chat' && <KbChat health={health} healthLoading={healthLoading} />}
+      {sub === 'build' && <KbBuild health={health} healthLoading={healthLoading} />}
+    </div>
+  );
+}
+
 // ============== MAIN APP ==============
 
 export default function App() {
@@ -2082,6 +2892,13 @@ export default function App() {
   const [dirMsg, setDirMsg] = useState('');
   const [focusTimeoutHours, setFocusTimeoutHours] = useState(48);
   const [focusTimeoutInput, setFocusTimeoutInput] = useState('48');
+
+  // --- sida-agent 知识库服务配置 ---
+  const [sidaHostInput, setSidaHostInput] = useState('127.0.0.1');
+  const [sidaPortInput, setSidaPortInput] = useState('6173');
+  const [sidaSaving, setSidaSaving] = useState(false);
+  const [sidaTesting, setSidaTesting] = useState(false);
+  const [sidaMsg, setSidaMsg] = useState('');
 
   // --- Scan state ---
   const [scanData, setScanData] = useState(null);
@@ -2226,6 +3043,8 @@ export default function App() {
       if (v > 0) { setFocusTimeoutHours(v); setFocusTimeoutInput(String(v)); }
       const m = Number(c.focus_max_per_subject);
       if (m > 0) setFocusMaxPerSubject(m);
+      if (c.sida_agent_host) setSidaHostInput(c.sida_agent_host);
+      if (c.sida_agent_port) setSidaPortInput(String(c.sida_agent_port));
     }).catch(() => { });
   }
 
@@ -2584,6 +3403,35 @@ export default function App() {
       setDirMsg(e.message || '保存失败');
     } finally {
       setDirSaving(false);
+    }
+  }
+
+  // 保存 sida-agent 服务地址（全局配置，对所有学生生效），保存后立即测连
+  async function saveSidaConfig() {
+    setSidaSaving(true); setSidaMsg('');
+    try {
+      await API.saveConfig({
+        sida_agent_host: sidaHostInput.trim() || '127.0.0.1',
+        sida_agent_port: sidaPortInput.trim(),
+      });
+      setSidaSaving(false);
+      await testSidaConnection();
+    } catch (e) {
+      setSidaMsg('保存失败：' + (e.message || e));
+      setSidaSaving(false);
+    }
+  }
+
+  // 测试与 sida-agent 的连通性（经本后端代理）
+  async function testSidaConnection() {
+    setSidaTesting(true); setSidaMsg('');
+    try {
+      const h = await AgentAPI.health();
+      setSidaMsg(`✅ 连接成功 · 图谱 ${h.graph_nodes} 节点 / 向量 ${h.vector_count} 条`);
+    } catch (e) {
+      setSidaMsg('无法连接：' + (e.message || e));
+    } finally {
+      setSidaTesting(false);
     }
   }
 
@@ -3522,6 +4370,10 @@ export default function App() {
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <History size={14} style={{ marginRight: 4, verticalAlign: -2 }} />时间线
             </button>
+            <button className={'tab-btn' + (tab === 'knowledge' ? ' active' : '')} onClick={() => setTab('knowledge')}
+              title="sida-agent 知识库：教材 / 对话 / 导入">
+              <Sparkles size={14} style={{ marginRight: 4, verticalAlign: -2 }} />知识库
+            </button>
             <button className={'tab-btn' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <Settings size={14} style={{ marginRight: 4, verticalAlign: -2 }} />配置&统计
@@ -3639,6 +4491,38 @@ export default function App() {
                   💡 提示：设置每学科重点练上限后，需切换一次「重点练」标签页即可生效。
                 </div>
               )}
+            </div>
+
+            {/* ============ 知识库服务（sida-agent）配置 ============ */}
+            <div className="config-box" style={{ marginTop: 20 }}>
+              <h2 className="config-title">知识库服务（sida-agent）</h2>
+              <p className="config-hint" style={{ marginTop: 0 }}>
+                错题本「知识库」页通过本服务对接 sida-agent 的 HTTP API（README 3.4）。请确保 sida-agent 已启动：
+                <code style={{ marginLeft: 4 }}>uv run python main.py --stage serve --host 127.0.0.1 --port 6173</code>
+              </p>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                <div className="field" style={{ flex: 2, minWidth: 220, marginBottom: 0 }}>
+                  <label className="field-label">服务地址（Host）</label>
+                  <input type="text" value={sidaHostInput}
+                    onChange={(e) => setSidaHostInput(e.target.value)}
+                    placeholder="例如：127.0.0.1 或 http://192.168.1.10" />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 120, marginBottom: 0 }}>
+                  <label className="field-label">端口（Port）</label>
+                  <input type="number" value={sidaPortInput}
+                    onChange={(e) => setSidaPortInput(e.target.value)}
+                    placeholder="默认 6173" />
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
+                <button className="save-btn" style={{ marginTop: 0 }} onClick={saveSidaConfig} disabled={sidaSaving}>
+                  {sidaSaving ? '保存中…' : '保存配置'}
+                </button>
+                <button className="kb-btn" onClick={testSidaConnection} disabled={sidaTesting} style={{ height: 34 }}>
+                  {sidaTesting ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />} 测试连接
+                </button>
+                {sidaMsg && <div className={'save-msg' + (sidaMsg.includes('失败') || sidaMsg.includes('无法') ? ' error' : '')} style={{ marginTop: 0 }}>{sidaMsg}</div>}
+              </div>
             </div>
 
             {/* ============ AI TOKEN 统计 ============ */}
@@ -4128,57 +5012,60 @@ export default function App() {
             </div>
           );
         })()}
-      </div>
 
-      {/* ============ TIMELINE TAB ============ */}
-      {tab === 'timeline' && (
-        <div className="panel">
-          {!timelineLoaded ? (
-            <div className="empty"><Loader2 size={28} className="spin" /><p>加载中…</p></div>
-          ) : timelineDays.length === 0 ? (
-            <div className="empty"><History size={40} /><p>时间线为空</p>
-              <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
-                编辑错题的解答后，编辑记录会按时间出现在这里
-              </p>
-            </div>
-          ) : (
-            <div className="timeline-page">
-              {timelineDays.map((day) => (
-                <div key={day.date} className="timeline-day">
-                  <div className="timeline-day-header">
-                    <div className="timeline-day-dot" />
-                    <span className="timeline-day-date">{day.date}</span>
-                    <span className="timeline-day-weekday">{day.weekday}</span>
-                    <span className="timeline-day-count">{day.count}<span className="count-unit">题</span></span>
-                  </div>
-                  <div className="timeline-day-items">
-                    {day.items.map((p) => (
-                      <ProblemCard key={p.file_path} problem={p}
-                        imageUrl={API.imageUrl(p.file_path)}
-                        onClick={() => openDetail(p, 'timeline')}
-                        extraFooter={
-                          <div className="timeline-card-footer">
-                            <span>✏️ 编辑 {p.edit_count} 次</span>
-                            {p.last_time_display && <span>· {p.last_time_display}</span>}
-                          </div>
-                        } />
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {/* Sentinel for infinite scroll */}
-              <div ref={timelineSentinelRef} className="timeline-sentinel">
-                {timelineLoading && (
-                  <div className="timeline-loading"><Loader2 size={18} className="spin" /> 加载更多…</div>
-                )}
-                {!timelineHasMore && timelineDays.length > 0 && (
-                  <div className="timeline-end">已加载全部时间线</div>
-                )}
+        {/* ============ TIMELINE TAB ============ */}
+        {tab === 'timeline' && (
+          <div className="panel">
+            {!timelineLoaded ? (
+              <div className="empty"><Loader2 size={28} className="spin" /><p>加载中…</p></div>
+            ) : timelineDays.length === 0 ? (
+              <div className="empty"><History size={40} /><p>时间线为空</p>
+                <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+                  编辑错题的解答后，编辑记录会按时间出现在这里
+                </p>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            ) : (
+              <div className="timeline-page">
+                {timelineDays.map((day) => (
+                  <div key={day.date} className="timeline-day">
+                    <div className="timeline-day-header">
+                      <div className="timeline-day-dot" />
+                      <span className="timeline-day-date">{day.date}</span>
+                      <span className="timeline-day-weekday">{day.weekday}</span>
+                      <span className="timeline-day-count">{day.count}<span className="count-unit">题</span></span>
+                    </div>
+                    <div className="timeline-day-items">
+                      {day.items.map((p) => (
+                        <ProblemCard key={p.file_path} problem={p}
+                          imageUrl={API.imageUrl(p.file_path)}
+                          onClick={() => openDetail(p, 'timeline')}
+                          extraFooter={
+                            <div className="timeline-card-footer">
+                              <span>✏️ 编辑 {p.edit_count} 次</span>
+                              {p.last_time_display && <span>· {p.last_time_display}</span>}
+                            </div>
+                          } />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {/* Sentinel for infinite scroll */}
+                <div ref={timelineSentinelRef} className="timeline-sentinel">
+                  {timelineLoading && (
+                    <div className="timeline-loading"><Loader2 size={18} className="spin" /> 加载更多…</div>
+                  )}
+                  {!timelineHasMore && timelineDays.length > 0 && (
+                    <div className="timeline-end">已加载全部时间线</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============ KNOWLEDGE BASE TAB ============ */}
+        {tab === 'knowledge' && <KnowledgeBaseTab />}
+      </div>
 
       {/* ============ DETAIL MODAL ============ */}
       {detail && (

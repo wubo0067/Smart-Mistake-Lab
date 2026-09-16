@@ -80,6 +80,15 @@ def init_students_db():
         )
         """
     )
+    # 全局配置表：跨学生共享的配置（如 sida-agent 服务地址），与错题数据无关
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS global_config (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
     conn.commit()
     count = conn.execute("SELECT COUNT(*) AS c FROM students").fetchone()["c"]
     if count == 0:
@@ -375,6 +384,30 @@ def set_config_value(key: str, value: str):
     conn = get_db()
     conn.execute(
         "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)", (key, value)
+    )
+    conn.commit()
+    conn.close()
+
+
+# --- 全局配置（跨学生共享，存 students.db 的 global_config 表） ---
+
+
+def get_global_config_value(key: str) -> str | None:
+    init_students_db()
+    conn = get_students_db()
+    row = conn.execute(
+        "SELECT value FROM global_config WHERE key = ?", (key,)
+    ).fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+
+def set_global_config_value(key: str, value: str):
+    init_students_db()
+    conn = get_students_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO global_config (key, value) VALUES (?, ?)",
+        (key, value),
     )
     conn.commit()
     conn.close()
