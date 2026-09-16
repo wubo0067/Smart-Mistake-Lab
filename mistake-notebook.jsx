@@ -2918,7 +2918,9 @@ function KbProgressBar({ label, done, total, pct, active }) {
 }
 
 // ---- 知识库 tab 容器 ----
-function KnowledgeBaseTab() {
+// active：所在页签是否正在显示。组件常驻挂载（切页只隐藏不卸载，保住对话状态），
+// 因此连接状态改为每次重新显示时刷新，而不是只在挂载时检查一次。
+function KnowledgeBaseTab({ active }) {
   const [sub, setSub] = useState('chat');
   const [health, setHealth] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -2929,7 +2931,7 @@ function KnowledgeBaseTab() {
     catch (e) { setHealth({ error: e.message || '无法连接知识库服务' }); }
     finally { setHealthLoading(false); }
   }
-  useEffect(() => { checkHealth(); }, []);
+  useEffect(() => { if (active) checkHealth(); }, [active]);
 
   const subs = [
     { key: 'books', label: '教材', icon: <BookOpen size={14} /> },
@@ -2950,8 +2952,13 @@ function KnowledgeBaseTab() {
         <KbServiceBanner health={health} healthLoading={healthLoading} onRetry={checkHealth} />
       </div>
       {sub === 'books' && <KbBooks health={health} healthLoading={healthLoading} onRetry={checkHealth} />}
-      {sub === 'chat' && <KbChat health={health} healthLoading={healthLoading} />}
-      {sub === 'build' && <KbBuild health={health} healthLoading={healthLoading} />}
+      {/* 对话/导入子页常驻挂载、切子页仅隐藏：卸载会丢失正在进行的对话与导入进度 */}
+      <div style={{ display: sub === 'chat' ? undefined : 'none' }}>
+        <KbChat health={health} healthLoading={healthLoading} />
+      </div>
+      <div style={{ display: sub === 'build' ? undefined : 'none' }}>
+        <KbBuild health={health} healthLoading={healthLoading} />
+      </div>
     </div>
   );
 }
@@ -5140,7 +5147,11 @@ export default function App() {
         )}
 
         {/* ============ KNOWLEDGE BASE TAB ============ */}
-        {tab === 'knowledge' && <KnowledgeBaseTab />}
+        {/* 常驻挂载、切页仅隐藏：条件渲染会在切走时卸载组件，丢失对话消息 /
+            当前会话 / 正在流式生成的回答；隐藏保留则回来即恢复原对话 */}
+        <div style={{ display: tab === 'knowledge' ? undefined : 'none' }}>
+          <KnowledgeBaseTab active={tab === 'knowledge'} />
+        </div>
       </div>
 
       {/* ============ DETAIL MODAL ============ */}
