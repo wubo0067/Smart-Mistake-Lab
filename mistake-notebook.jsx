@@ -2363,7 +2363,8 @@ const KB_SUBJECTS = [
 ];
 
 // Markdown + LaTeX 公式渲染（sida-agent 回答含 $...$ / $$...$$ 与来源标注）
-function KbMarkdown({ text }) {
+// memo：解析 markdown + KaTeX 排版开销大，text 未变时跳过重渲染（否则每次敲字都会全量重解析）
+const KbMarkdown = React.memo(function KbMarkdown({ text }) {
   return (
     <div className="kb-md">
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
@@ -2371,7 +2372,7 @@ function KbMarkdown({ text }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function KbServiceBanner({ health, healthLoading, onRetry }) {
   if (healthLoading) {
@@ -2459,7 +2460,8 @@ function splitKbAnswer(text) {
 }
 
 // 单条消息（用户提问 / 知识库回答）的渲染；供轮次分组使用
-function KbMsgNode({ m }) {
+// memo：输入框敲字会重渲染整个 KbChat，消息对象引用未变时跳过，避免全量重排 markdown
+const KbMsgNode = React.memo(function KbMsgNode({ m }) {
   // 关联教材原图：点缩略图放大，左右方向键 / 箭头翻页（-1 = 预览关闭）
   const [previewIdx, setPreviewIdx] = useState(-1);
   const isAssistant = m.role === 'assistant';
@@ -2506,7 +2508,7 @@ function KbMsgNode({ m }) {
       )}
     </div>
   );
-}
+});
 
 // ---- 子视图②：多轮对话（SSE 流式） ----
 function KbChat({ health, healthLoading }) {
