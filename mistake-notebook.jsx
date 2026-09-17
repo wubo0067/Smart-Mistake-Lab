@@ -2913,7 +2913,7 @@ function KbBuild({ health, healthLoading }) {
   const [book, setBook] = useState('');
   const [startPage, setStartPage] = useState('1');
   const [endPage, setEndPage] = useState('12');
-  const [subject, setSubject] = useState('physics');
+  const [subject, setSubject] = useState('math');
   const [maxNewCalls, setMaxNewCalls] = useState('');
   const [maxChunks, setMaxChunks] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);

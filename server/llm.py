@@ -2034,8 +2034,11 @@ def parse_similar_rerank_result(raw_text: str) -> list[dict]:
     for raw in ranked:
         if not isinstance(raw, dict):
             continue
+        raw_index = raw.get("index")
+        if raw_index is None:
+            continue
         try:
-            index = int(raw.get("index"))
+            index = int(raw_index)
         except (TypeError, ValueError):
             continue
         if index in seen:
