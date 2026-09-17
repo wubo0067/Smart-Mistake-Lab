@@ -183,6 +183,83 @@ def health():
     return {"status": "ok"}
 
 
+# --- 本机文件浏览（供前端「选择文件」控件使用）---
+
+# 浏览器出于安全限制拿不到 <input type="file"> 选中的绝对路径，而建库需要传给
+# sida-agent 一个服务端可读的绝对路径，因此由后端列出本机目录供用户逐级选择。
+# 仅返回名称 / 路径 / 大小，不读取文件内容。适用于本地或可信局域网部署。
+
+PDF_EXTENSIONS = {".pdf"}
+
+# 盘根常见系统目录，浏览时直接跳过
+_FS_SKIP_DIRS = {"$RECYCLE.BIN", "System Volume Information", "Config.Msi", "Recovery"}
+
+
+@app.get("/api/fs/roots")
+def fs_roots():
+    """可浏览的根位置：Windows 列出存在的盘符，其他系统为 `/` 与用户主目录。"""
+    roots = []
+    if os.name == "nt":
+        import string
+
+        for letter in string.ascii_uppercase:
+            drive = f"{letter}:\\"
+            if os.path.exists(drive):
+                roots.append({"name": drive, "path": drive, "kind": "drive"})
+    else:
+        roots.append({"name": "/", "path": "/", "kind": "drive"})
+
+    home = str(Path.home())
+    if home and not any(
+        r["path"].rstrip("\\/").lower() == home.rstrip("\\/").lower() for r in roots
+    ):
+        roots.insert(0, {"name": "主目录", "path": home, "kind": "home"})
+    return {"roots": roots}
+
+
+@app.get("/api/fs/list")
+def fs_list(path: str = Query("", description="绝对目录路径，留空则用用户主目录")):
+    """列出目录下的子目录与 PDF 文件（目录在前、文件在后）。"""
+    raw = (path or "").strip().strip('"').strip("'")
+    target = os.path.abspath(os.path.expanduser(raw)) if raw else str(Path.home())
+
+    # 传入的是文件（例如表单里已填好的 pdf 路径）时，回退到它所在目录
+    if not os.path.isdir(target):
+        parent_of_file = os.path.dirname(target)
+        if parent_of_file and os.path.isdir(parent_of_file):
+            target = parent_of_file
+        else:
+            raise HTTPException(status_code=400, detail=f"目录不存在：{target}")
+
+    try:
+        entries = sorted(os.listdir(target), key=lambda s: s.lower())
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"没有权限访问：{target}")
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"读取目录失败：{e}")
+
+    dirs, files = [], []
+    for entry in entries:
+        if entry.startswith(".") or entry in _FS_SKIP_DIRS:
+            continue
+        full = os.path.normpath(os.path.join(target, entry))
+        try:
+            if os.path.isdir(full):
+                dirs.append({"name": entry, "path": full})
+            elif os.path.splitext(entry)[1].lower() in PDF_EXTENSIONS:
+                files.append({"name": entry, "path": full, "size": os.path.getsize(full)})
+        except OSError:
+            # 权限/失效软链等：跳过单个条目，不影响整目录浏览
+            continue
+
+    # 已位于根目录（如 D:\ 或 /）时 parent 返回空串，前端据此禁用「上级」
+    _, tail = os.path.splitdrive(target)
+    parent = os.path.dirname(target)
+    if not tail.strip("\\/") or os.path.normcase(parent) == os.path.normcase(target):
+        parent = ""
+    return {"path": target, "parent": parent, "dirs": dirs, "files": files}
+
+
 # --- Config ---
 
 # sida-agent HTTP API 服务（知识库）默认地址：见 sida-agent README 3.4

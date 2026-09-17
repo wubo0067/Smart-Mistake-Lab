@@ -234,6 +234,24 @@ const API = {
   }
 };
 
+// ============== 本机文件系统 API（仅用于「选择文件」控件） ==============
+// 浏览器出于安全限制拿不到所选文件的绝对路径，因此改为让后端列本机目录，
+// 用户逐级点选后再把绝对路径回填到表单（sida-agent 需要的是服务端可读路径）。
+
+const FsAPI = {
+  async roots() { return (await apiFetch('/api/fs/roots')).json(); },
+  async list(path) {
+    const q = path ? `?path=${encodeURIComponent(path)}` : '';
+    return (await apiFetch(`/api/fs/list${q}`)).json();
+  },
+};
+
+function formatFileSize(bytes) {
+  if (typeof bytes !== 'number' || !isFinite(bytes)) return '';
+  if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+
 // ============== sida-agent 知识库 API（经本后端 /api/agent/* 代理） ==============
 
 const AgentAPI = {
@@ -1697,7 +1715,15 @@ const CSS = `
 }
 
 /* ============ 知识库（sida-agent） ============ */
-.mnb input[type="number"], .mnb input[type="password"], .mnb select {
+/* 数字输入原本只有一条下划线，宽度沿用浏览器默认（约 20 字符），会把整行撑开、列宽无法对齐；
+   这里补齐与文本输入一致的宽度 / 内边距，并允许在 grid / flex 中收缩。 */
+.mnb input[type="number"] {
+  width: 100%; min-width: 0; border: none; border-bottom: 1.5px solid var(--grid);
+  background: transparent; padding: 7px 2px; font-size: 14px;
+  font-family: inherit; color: var(--ink); outline: none;
+}
+.mnb input[type="number"]:focus { border-bottom-color: var(--margin); }
+.mnb input[type="password"], .mnb select {
   border-bottom: 1.5px solid var(--grid);
 }
 .mnb .kb-head {
@@ -1853,6 +1879,35 @@ const CSS = `
 .mnb .kb-build-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
 .mnb .kb-build-form { flex: 1; min-width: 320px; }
 .mnb .kb-build-progress { flex: 1; min-width: 320px; border-left: 1px dashed var(--grid); padding-left: 20px; }
+
+/* 表单分区：教材文件 / 教材信息 / 高级选项 */
+.mnb .kb-form-section { margin-bottom: 16px; }
+.mnb .kb-form-section-title {
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 13.5px; font-weight: 700; color: var(--ink);
+  margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px dashed var(--grid);
+}
+.mnb .kb-form-advanced { margin-bottom: 14px; }
+.mnb .kb-field-hint { font-size: 11.5px; color: var(--ink-soft); margin-top: 6px; line-height: 1.5; }
+
+/* 路径行：输入框占满、按钮不被压缩 */
+.mnb .kb-path-row { display: flex; gap: 10px; align-items: flex-end; }
+.mnb .kb-path-row > input[type="text"] { flex: 1; min-width: 0; }
+.mnb .kb-path-row > .kb-btn { flex-shrink: 0; }
+
+/* 教材信息：显名自适应 + 页码固定窄列 + 学科一列，底部基线对齐 */
+.mnb .kb-form-grid {
+  display: grid; gap: 10px 14px; align-items: end;
+  grid-template-columns: minmax(0, 1fr) 84px 84px 112px;
+}
+.mnb .kb-form-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mnb .kb-form-grid .field { margin-bottom: 0; }
+.mnb .kb-select {
+  width: 100%; padding: 7px 9px; border: 1.5px solid var(--grid); border-radius: 8px;
+  background: #fff; font-family: inherit; font-size: 14px; color: var(--ink);
+  outline: none; cursor: pointer;
+}
+.mnb .kb-select:focus { border-color: var(--margin); }
 .mnb .kb-estimate { margin-top: 14px; border: 1.5px solid var(--grid); border-radius: 10px; padding: 12px 14px; background: var(--paper); }
 .mnb .kb-estimate-title { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); margin-bottom: 8px; }
 .mnb .kb-estimate-grid { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--ink); }
@@ -1885,11 +1940,70 @@ const CSS = `
 .mnb .kb-task-id { font-family: monospace; color: var(--ink-soft); flex-shrink: 0; }
 .mnb .kb-task-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .mnb .kb-task-time { color: var(--ink-soft); flex-shrink: 0; }
+
+/* 本机文件选择弹窗 */
+.mnb .kb-picker { max-width: 780px; display: flex; flex-direction: column; overflow: hidden; }
+.mnb .kb-picker h2 { margin-bottom: 12px; }
+.mnb .kb-picker-bar { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 10px; }
+.mnb .kb-picker-bar > .kb-btn { flex-shrink: 0; }
+.mnb .kb-picker-bar > input[type="text"] {
+  flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+}
+.mnb .kb-picker-body { display: flex; gap: 12px; min-height: 280px; max-height: 50vh; }
+.mnb .kb-picker-side {
+  width: 136px; flex-shrink: 0; overflow-y: auto; padding-right: 10px;
+  border-right: 1px dashed var(--grid); display: flex; flex-direction: column; gap: 4px;
+}
+.mnb .kb-picker-side-title {
+  font-size: 11.5px; font-weight: 700; color: var(--ink-soft); letter-spacing: .5px; margin-bottom: 2px;
+}
+.mnb .kb-picker-drive {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px;
+  border: 1.5px solid transparent; background: none; cursor: pointer; text-align: left;
+  color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 600;
+}
+.mnb .kb-picker-drive:hover { background: var(--paper); }
+.mnb .kb-picker-drive.active { border-color: var(--ink); background: var(--paper); }
+.mnb .kb-picker-list { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.mnb .kb-picker-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px;
+  border: 1.5px solid transparent; border-radius: 7px; background: none; cursor: pointer;
+  color: var(--ink); font-family: inherit; font-size: 13.5px; text-align: left;
+}
+.mnb .kb-picker-row:hover { background: var(--paper); }
+.mnb .kb-picker-row.selected { border-color: var(--accent-2); background: #EAF4F1; }
+.mnb .kb-picker-icon { flex-shrink: 0; color: var(--ink-soft); }
+.mnb .kb-picker-row.dir .kb-picker-icon { color: #c99a2e; }
+.mnb .kb-picker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mnb .kb-picker-size { flex-shrink: 0; font-size: 11.5px; color: var(--ink-soft); }
+.mnb .kb-picker-arrow { flex-shrink: 0; color: var(--ink-soft); }
+.mnb .kb-picker-hint { display: flex; align-items: center; gap: 6px; padding: 14px 10px; font-size: 12.5px; color: var(--ink-soft); }
+.mnb .kb-picker-hint.error { color: var(--margin); }
+.mnb .kb-picker-foot {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  border-top: 1px dashed var(--grid); padding-top: 12px;
+}
+.mnb .kb-picker-foot > .kb-btn { flex-shrink: 0; }
+.mnb .kb-picker-selected {
+  flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 @media (max-width: 720px) {
   .mnb .kb-chat-layout { flex-direction: column; height: auto; min-height: 0; }
   .mnb .kb-messages { max-height: 60vh; }
   .mnb .kb-sessions { width: 100%; border-right: none; padding-right: 0; border-bottom: 1px dashed var(--grid); padding-bottom: 12px; max-height: 200px; }
   .mnb .kb-build-progress { border-left: none; padding-left: 0; border-top: 1px dashed var(--grid); padding-top: 16px; }
+  /* 窄屏：教材信息改为两列，路径行按钮单独一行 */
+  .mnb .kb-form-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .mnb .kb-grid-name { grid-column: 1 / -1; }
+  .mnb .kb-path-row { flex-wrap: wrap; }
+  .mnb .kb-path-row > input[type="text"] { flex: 1 1 100%; }
+  .mnb .kb-picker-body { flex-direction: column; max-height: 56vh; }
+  .mnb .kb-picker-side {
+    width: 100%; border-right: none; padding-right: 0;
+    border-bottom: 1px dashed var(--grid); padding-bottom: 8px;
+    flex-direction: row; flex-wrap: wrap; gap: 6px; max-height: 92px;
+  }
 }
 `;
 
@@ -2679,6 +2793,119 @@ function KbChat({ health, healthLoading }) {
   );
 }
 
+// ---- 本机文件选择弹窗：左侧盘符/主目录，右侧目录 + PDF 列表 ----
+// 单击目录进入、单击 PDF 选中、双击 PDF 直接确认；也可在顶部地址栏直接输入路径跳转。
+function PathPickerModal({ initialPath, onPick, onClose }) {
+  const [cwd, setCwd] = useState('');
+  const [parent, setParent] = useState('');
+  const [dirs, setDirs] = useState([]);
+  const [files, setFiles] = useState([]);
+  const [roots, setRoots] = useState([]);
+  const [selected, setSelected] = useState('');
+  const [pathInput, setPathInput] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  async function open(target) {
+    setLoading(true); setError(''); setSelected('');
+    try {
+      const d = await FsAPI.list(target);
+      setCwd(d.path || '');
+      setParent(d.parent || '');
+      setDirs(d.dirs || []);
+      setFiles(d.files || []);
+      setPathInput(d.path || '');
+    } catch (e) {
+      setError(e.message || '读取目录失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    FsAPI.roots().then((d) => setRoots(d.roots || [])).catch(() => { });
+    open(initialPath || '');
+    // 仅在打开弹窗时定位一次初始目录
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal kb-picker" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} title="关闭 (Esc)"><X size={16} /></button>
+        <h2>选择教材 PDF</h2>
+
+        <div className="kb-picker-bar">
+          <button className="kb-btn" onClick={() => open(parent)} disabled={!parent || loading}
+            title={parent ? `返回 ${parent}` : '已是根目录'}>
+            <ChevronLeft size={14} /> 上级
+          </button>
+          <input type="text" value={pathInput} spellCheck={false}
+            onChange={(e) => setPathInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') open(pathInput.trim()); }}
+            placeholder="可直接粘贴路径后回车跳转" />
+          <button className="kb-btn" onClick={() => open(pathInput.trim())} disabled={loading} title="跳转 / 刷新">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+
+        <div className="kb-picker-body">
+          <div className="kb-picker-side">
+            <div className="kb-picker-side-title">位置</div>
+            {roots.map((r) => (
+              <button key={r.path}
+                className={'kb-picker-drive' + (cwd === r.path ? ' active' : '')}
+                onClick={() => open(r.path)} title={r.path}>
+                <FolderOpen size={14} /> {r.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="kb-picker-list">
+            {loading && <div className="kb-picker-hint"><Loader2 size={14} className="spin" /> 读取中…</div>}
+            {!loading && error && <div className="kb-picker-hint error"><AlertCircle size={14} /> {error}</div>}
+            {!loading && !error && dirs.length === 0 && files.length === 0 && (
+              <div className="kb-picker-hint">此目录下没有子目录或 PDF 文件</div>
+            )}
+            {!loading && !error && dirs.map((d) => (
+              <button key={d.path} className="kb-picker-row dir" onClick={() => open(d.path)} title={d.path}>
+                <FolderOpen size={15} className="kb-picker-icon" />
+                <span className="kb-picker-name">{d.name}</span>
+                <ChevronRight size={14} className="kb-picker-arrow" />
+              </button>
+            ))}
+            {!loading && !error && files.map((f) => (
+              <button key={f.path}
+                className={'kb-picker-row file' + (selected === f.path ? ' selected' : '')}
+                onClick={() => setSelected(f.path)}
+                onDoubleClick={() => onPick(f.path)}
+                title={f.path}>
+                <FileText size={15} className="kb-picker-icon" />
+                <span className="kb-picker-name">{f.name}</span>
+                <span className="kb-picker-size">{formatFileSize(f.size)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="kb-picker-foot">
+          <span className="kb-picker-selected" title={selected}>{selected || '单击选中 PDF，双击可直接确认'}</span>
+          <button className="kb-btn" onClick={onClose}>取消</button>
+          <button className="kb-btn primary" onClick={() => selected && onPick(selected)} disabled={!selected}>
+            <Check size={14} /> 选择
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- 子视图③：导入（build 异步任务 + SSE 进度） ----
 function KbBuild({ health, healthLoading }) {
   const serviceDown = health && health.error;
@@ -2690,6 +2917,7 @@ function KbBuild({ health, healthLoading }) {
   const [maxNewCalls, setMaxNewCalls] = useState('');
   const [maxChunks, setMaxChunks] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
 
   const [estimating, setEstimating] = useState(false);
   const [estimate, setEstimate] = useState(null);
@@ -2716,6 +2944,13 @@ function KbBuild({ health, healthLoading }) {
     if (confirm !== undefined) p.confirm = confirm;
     return p;
   };
+
+  // 文件选择器回调：回填路径；显示名留空时顺手带出文件名（去扩展名）
+  function pickPdf(filePath) {
+    setPdf(filePath);
+    setShowPicker(false);
+    if (!book.trim()) setBook(filePath.split(/[\\/]/).pop().replace(/\.[^.]+$/, ''));
+  }
 
   async function doEstimate() {
     if (!pdf.trim()) { setError('请先填写教材 PDF 路径'); return; }
@@ -2814,39 +3049,52 @@ function KbBuild({ health, healthLoading }) {
   return (
     <div className="kb-build-layout">
       <div className="kb-build-form">
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label className="field-label">教材 PDF 路径</label>
-          <input type="text" value={pdf} onChange={(e) => setPdf(e.target.value)} placeholder="例如：D:\教材\物理9S.pdf" />
+        <div className="kb-form-section">
+          <div className="kb-form-section-title">教材文件</div>
+          <div className="kb-path-row">
+            <input type="text" value={pdf} spellCheck={false}
+              onChange={(e) => setPdf(e.target.value)}
+              placeholder="选择或粘贴 PDF 绝对路径，例如 D:\教材\物理9S.pdf" />
+            <button className="kb-btn" onClick={() => setShowPicker(true)} title="浏览本机文件">
+              <FolderOpen size={14} /> 选择文件
+            </button>
+          </div>
+          <div className="kb-field-hint">点「选择文件」逐级点选 PDF 即可，也可直接粘贴绝对路径。</div>
         </div>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <div className="field" style={{ flex: 2, minWidth: 160 }}>
-            <label className="field-label">教材显示名（可选）</label>
-            <input type="text" value={book} onChange={(e) => setBook(e.target.value)} placeholder="缺省取文件名" />
-          </div>
-          <div className="field" style={{ flex: '0 0 76px' }}>
-            <label className="field-label">起始页</label>
-            <input type="number" min={1} value={startPage} onChange={(e) => setStartPage(e.target.value)} />
-          </div>
-          <div className="field" style={{ flex: '0 0 76px' }}>
-            <label className="field-label">结束页</label>
-            <input type="number" min={1} value={endPage} onChange={(e) => setEndPage(e.target.value)} />
-          </div>
-          <div className="field" style={{ flex: '0 0 110px', marginLeft: 'auto' }}>
-            <label className="field-label">学科</label>
-            <select value={subject} onChange={(e) => setSubject(e.target.value)} style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--grid)', borderRadius: 8, background: '#fff', fontFamily: 'inherit', fontSize: 14 }}>
-              {KB_SUBJECTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
+
+        <div className="kb-form-section">
+          <div className="kb-form-section-title">教材信息</div>
+          <div className="kb-form-grid">
+            <div className="field kb-grid-name">
+              <label className="field-label">教材显示名（可选）</label>
+              <input type="text" value={book} onChange={(e) => setBook(e.target.value)} placeholder="缺省取文件名" />
+            </div>
+            <div className="field">
+              <label className="field-label">起始页</label>
+              <input type="number" min={1} value={startPage} onChange={(e) => setStartPage(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field-label">结束页</label>
+              <input type="number" min={1} value={endPage} onChange={(e) => setEndPage(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field-label">学科</label>
+              <select className="kb-select" value={subject} onChange={(e) => setSubject(e.target.value)}>
+                {KB_SUBJECTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
           </div>
         </div>
-        <div style={{ marginBottom: 10 }}>
+
+        <div className="kb-form-section kb-form-advanced">
           <button className="kb-link-btn" onClick={() => setShowAdvanced((v) => !v)}>{showAdvanced ? '▾' : '▸'} 高级选项（控成本）</button>
           {showAdvanced && (
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-              <div className="field" style={{ flex: 1, minWidth: 150 }}>
+            <div className="kb-form-grid two">
+              <div className="field">
                 <label className="field-label">本批视觉新调用上限</label>
                 <input type="number" min={0} value={maxNewCalls} onChange={(e) => setMaxNewCalls(e.target.value)} placeholder="留空=不限" />
               </div>
-              <div className="field" style={{ flex: 1, minWidth: 150 }}>
+              <div className="field">
                 <label className="field-label">本次处理新子块上限</label>
                 <input type="number" min={0} value={maxChunks} onChange={(e) => setMaxChunks(e.target.value)} placeholder="留空=不限" />
               </div>
@@ -2910,6 +3158,10 @@ function KbBuild({ health, healthLoading }) {
           </div>
         )}
       </div>
+
+      {showPicker && (
+        <PathPickerModal initialPath={pdf.trim()} onPick={pickPdf} onClose={() => setShowPicker(false)} />
+      )}
     </div>
   );
 }
