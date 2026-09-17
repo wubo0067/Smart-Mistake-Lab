@@ -1780,10 +1780,16 @@ const CSS = `
   letter-spacing: 1px; white-space: nowrap;
 }
 .mnb .kb-msg { display: flex; flex-direction: column; }
-.mnb .kb-msg-role { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); margin-bottom: 4px; }
-.mnb .kb-msg.user .kb-msg-role { color: var(--accent-2); }
+.mnb .kb-msg-role {
+  align-self: flex-start; display: inline-flex; align-items: center;
+  font-size: 15px; font-weight: 800; letter-spacing: 1px;
+  margin-bottom: 6px; padding: 1px 10px; border-radius: 8px;
+}
+.mnb .kb-msg.user { border-left: 3px solid #1F7A3D; padding-left: 10px; }
+.mnb .kb-msg.user .kb-msg-role { color: #1F7A3D; background: #E6F4EA; }
 .mnb .kb-msg-user { font-size: 14px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; }
-.mnb .kb-msg.assistant { align-self: stretch; }
+.mnb .kb-msg.assistant { align-self: stretch; border-left: 3px solid var(--margin); padding-left: 10px; }
+.mnb .kb-msg.assistant .kb-msg-role { color: var(--margin); background: #FDECEA; }
 .mnb .kb-msg.assistant .kb-md { font-size: 14px; line-height: 1.7; color: var(--ink); }
 .mnb .kb-thinking { margin-bottom: 6px; font-size: 12px; color: var(--ink-soft); }
 .mnb .kb-thinking summary { cursor: pointer; font-weight: 600; }
