@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, Send, Square, MessageSquare, Upload, Activity, FileText, Link2, Images } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
@@ -1787,7 +1788,7 @@ const CSS = `
 }
 .mnb .kb-msg.user { border-left: 3px solid #1F7A3D; padding-left: 10px; }
 .mnb .kb-msg.user .kb-msg-role { color: #1F7A3D; background: #E6F4EA; }
-.mnb .kb-msg-user { font-size: 14px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; }
+.mnb .kb-msg-user { font-size: 16.5px; line-height: 1.65; font-weight: 700; color: var(--ink); white-space: pre-wrap; }
 .mnb .kb-msg.assistant { align-self: stretch; border-left: 3px solid var(--margin); padding-left: 10px; }
 .mnb .kb-msg.assistant .kb-msg-role { color: var(--margin); background: #FDECEA; }
 .mnb .kb-msg.assistant .kb-md { font-size: 14px; line-height: 1.7; color: var(--ink); }
@@ -1817,8 +1818,10 @@ const CSS = `
 .mnb .kb-md pre { background: var(--paper); padding: 10px 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 8px; }
 .mnb .kb-md pre code { background: none; padding: 0; }
 .mnb .kb-md blockquote { border-left: 3px solid var(--grid); margin: 0 0 8px; padding: 2px 12px; color: var(--ink-soft); }
-.mnb .kb-md table { border-collapse: collapse; margin: 0 0 8px; font-size: 13px; }
-.mnb .kb-md th, .mnb .kb-md td { border: 1px solid var(--grid); padding: 5px 9px; }
+.mnb .kb-md table { border-collapse: collapse; margin: 0 0 8px; font-size: 13px; display: block; width: max-content; max-width: 100%; overflow-x: auto; }
+.mnb .kb-md th, .mnb .kb-md td { border: 1px solid #B9C6D8; padding: 6px 12px; text-align: left; vertical-align: middle; }
+.mnb .kb-md th { background: #EEF3FA; font-weight: 700; white-space: nowrap; }
+.mnb .kb-md tr:nth-child(even) td { background: #F7FAFD; }
 .mnb .kb-md a { color: var(--accent-2); }
 .mnb .kb-md img { max-width: 100%; border-radius: 6px; }
 
@@ -2363,7 +2366,7 @@ const KB_SUBJECTS = [
 function KbMarkdown({ text }) {
   return (
     <div className="kb-md">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
         {text || ''}
       </ReactMarkdown>
     </div>
@@ -2813,20 +2816,20 @@ function KbBuild({ health, healthLoading }) {
           <label className="field-label">教材 PDF 路径</label>
           <input type="text" value={pdf} onChange={(e) => setPdf(e.target.value)} placeholder="例如：D:\教材\物理9S.pdf" />
         </div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <div className="field" style={{ flex: 2, minWidth: 160 }}>
             <label className="field-label">教材显示名（可选）</label>
             <input type="text" value={book} onChange={(e) => setBook(e.target.value)} placeholder="缺省取文件名" />
           </div>
-          <div className="field" style={{ flex: 1, minWidth: 90 }}>
+          <div className="field" style={{ flex: '0 0 76px' }}>
             <label className="field-label">起始页</label>
             <input type="number" min={1} value={startPage} onChange={(e) => setStartPage(e.target.value)} />
           </div>
-          <div className="field" style={{ flex: 1, minWidth: 90 }}>
+          <div className="field" style={{ flex: '0 0 76px' }}>
             <label className="field-label">结束页</label>
             <input type="number" min={1} value={endPage} onChange={(e) => setEndPage(e.target.value)} />
           </div>
-          <div className="field" style={{ flex: 1, minWidth: 100 }}>
+          <div className="field" style={{ flex: '0 0 110px', marginLeft: 'auto' }}>
             <label className="field-label">学科</label>
             <select value={subject} onChange={(e) => setSubject(e.target.value)} style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--grid)', borderRadius: 8, background: '#fff', fontFamily: 'inherit', fontSize: 14 }}>
               {KB_SUBJECTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
