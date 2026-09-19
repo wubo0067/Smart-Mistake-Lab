@@ -47,6 +47,12 @@ if [ -n "$HOST_IP" ]; then
 fi
 
 echo -e "${CYAN}"
+echo "  SSS  M   M  L"
+echo " S     MM MM  L"
+echo "  SSS  M M M  L"
+echo "     S M   M  L"
+echo " SSS  M   M  LLL"
+echo ""
 echo "╔══════════════════════════════════════════╗"
 echo "║        Smart Mistake Lab  启动脚本      ║"
 echo "╚══════════════════════════════════════════╝"

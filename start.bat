@@ -2,6 +2,12 @@
 title Smart Mistake Lab
 
 echo.
+echo   SSS  M   M  L
+echo  S     MM MM  L
+echo   SSS  M M M  L
+echo      S M   M  L
+echo  SSS  M   M  LLL
+echo.
 echo === Smart Mistake Lab 一键启动 ===
 echo.
 

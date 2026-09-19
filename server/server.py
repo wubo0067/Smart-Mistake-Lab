@@ -1,9 +1,9 @@
 '''
 Author: calm.wu wubo0067@hotmail.com
 Date: 2026-07-03 13:55:29
-LastEditors: calm.wu wubo0067@hotmail.com
-LastEditTime: 2026-09-12 13:37:18
-FilePath: server/server.py
+LastEditors: calm.wu
+LastEditTime: 2026-09-18 10:57:05
+FilePath: /Smart-Mistake-Lab/server/server.py
 Description: 主服务器入口，负责处理请求和响应。
 
 Copyright (c) 2026 by ${git_name_email}, All Rights Reserved.
@@ -1398,6 +1398,7 @@ async def agent_build_events_stream(task_id: str, since: int = Query(0, ge=0)):
                         if chunk:
                             yield chunk
         except httpx.HTTPError:
+            # 处理上游连接错误
             err = {"type": "error", "detail": _agent_unreachable_detail(base)}
             yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
             yield "event: end\ndata: {}\n\n"
@@ -1417,6 +1418,7 @@ else:
     logger.info("开发模式下请确保 Vite dev server (npm run dev) 正在运行")
 
 if __name__ == "__main__":
+    """ 启动服务器 """
     import uvicorn
 
     parser = argparse.ArgumentParser(description="Smart Mistake Lab Server")
