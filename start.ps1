@@ -108,15 +108,14 @@ if ($Ip) {
     $BackendCmdOnly += " --host '$($Ip -replace "'", "''")'"
 }
 
-Write-Host "  SSS  M   M  L" -ForegroundColor Cyan
-Write-Host " S     MM MM  L" -ForegroundColor Cyan
-Write-Host "  SSS  M M M  L" -ForegroundColor Cyan
-Write-Host "     S M   M  L" -ForegroundColor Cyan
-Write-Host " SSS  M   M  LLL" -ForegroundColor Cyan
+Write-Host "  ____  __  __  _      " -ForegroundColor Cyan
+Write-Host " / ___||  \/  || |     " -ForegroundColor Cyan
+Write-Host " \___ \| |\/| || |     " -ForegroundColor Cyan
+Write-Host "  ___) | |  | || |___  " -ForegroundColor Cyan
+Write-Host " |____/|_|  |_||_____| " -ForegroundColor Cyan
 Write-Host "╔══════════════════════════════════════════╗" -ForegroundColor Cyan
 Write-Host "║        Smart Mistake Lab  启动脚本      ║" -ForegroundColor Cyan
 Write-Host "╚══════════════════════════════════════════╝" -ForegroundColor Cyan
-Write-Host ""
 
 # ─── 启动后端 ────────────────────────────────────
 if (-not $NoBackend) {
