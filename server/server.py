@@ -1296,6 +1296,8 @@ def agent_chat_session_detail(session_id: str):
 async def agent_build_estimate(request: Request):
     base = _sida_agent_base_url()
     body = await request.json()
+    if not (body.get("subject") or "").strip():
+        raise HTTPException(status_code=400, detail="必须先选择学科（subject 不能为空）")
     try:
         r = httpx.post(base + "/build/estimate", json=body, timeout=60.0)
     except httpx.HTTPError:
@@ -1309,6 +1311,8 @@ async def agent_build_estimate(request: Request):
 async def agent_build_submit(request: Request):
     base = _sida_agent_base_url()
     body = await request.json()
+    if not (body.get("subject") or "").strip():
+        raise HTTPException(status_code=400, detail="必须先选择学科（subject 不能为空）")
     try:
         r = httpx.post(base + "/build", json=body, timeout=60.0)
     except httpx.HTTPError:
