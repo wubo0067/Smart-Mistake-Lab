@@ -1,4 +1,4 @@
-'''
+"""
 Author: calm.wu wubo0067@hotmail.com
 Date: 2026-07-03 13:55:29
 LastEditors: calm.wu
@@ -7,7 +7,7 @@ FilePath: /Smart-Mistake-Lab/server/server.py
 Description: 主服务器入口，负责处理请求和响应。
 
 Copyright (c) 2026 by ${git_name_email}, All Rights Reserved.
-'''
+"""
 
 import os
 import json
@@ -247,7 +247,9 @@ def fs_list(path: str = Query("", description="绝对目录路径，留空则用
             if os.path.isdir(full):
                 dirs.append({"name": entry, "path": full})
             elif os.path.splitext(entry)[1].lower() in PDF_EXTENSIONS:
-                files.append({"name": entry, "path": full, "size": os.path.getsize(full)})
+                files.append(
+                    {"name": entry, "path": full, "size": os.path.getsize(full)}
+                )
         except OSError:
             # 权限/失效软链等：跳过单个条目，不影响整目录浏览
             continue
@@ -271,7 +273,9 @@ def _sida_agent_base_url() -> str:
     """从全局配置拼出 sida-agent 服务 base URL（每次实时读取，改配置即生效）。
 
     host 字段允许直接填完整 URL（如 http://192.168.1.10:8000），此时忽略 port。"""
-    host = (db.get_global_config_value("sida_agent_host") or SIDA_AGENT_DEFAULT_HOST).strip()
+    host = (
+        db.get_global_config_value("sida_agent_host") or SIDA_AGENT_DEFAULT_HOST
+    ).strip()
     port_raw = (db.get_global_config_value("sida_agent_port") or "").strip()
     try:
         port = int(port_raw) if port_raw else SIDA_AGENT_DEFAULT_PORT
@@ -334,13 +338,18 @@ def get_config():
         "image_dir": db.get_config_value("image_dir") or "",
         "focus_timeout_hours": db.get_focus_timeout_hours(),
         "focus_max_per_subject": db.get_focus_max_per_subject(),
-        "sida_agent_host": db.get_global_config_value("sida_agent_host") or SIDA_AGENT_DEFAULT_HOST,
-        "sida_agent_port": db.get_global_config_value("sida_agent_port") or str(SIDA_AGENT_DEFAULT_PORT),
+        "sida_agent_host": db.get_global_config_value("sida_agent_host")
+        or SIDA_AGENT_DEFAULT_HOST,
+        "sida_agent_port": db.get_global_config_value("sida_agent_port")
+        or str(SIDA_AGENT_DEFAULT_PORT),
+        "chat_session_page_size": db.get_chat_session_page_size(),
     }
 
 
 @app.get("/api/token-stats")
-def token_stats(scope: str = Query("student", description="student=当前学生, all=全家合计")):
+def token_stats(
+    scope: str = Query("student", description="student=当前学生, all=全家合计")
+):
     """AI token 消耗统计：历史总量 + 当月每日消耗（仅保留当月明细）。
 
     scope=all 时返回全家合计 + 各学生分项。"""
@@ -406,6 +415,27 @@ def update_config(data: dict):
                 )
         else:
             db.set_global_config_value("sida_agent_port", str(SIDA_AGENT_DEFAULT_PORT))
+    if "chat_session_page_size" in data:
+        val = data["chat_session_page_size"]
+        if val is None or str(val).strip() == "":
+            db.set_global_config_value(
+                "chat_session_page_size", str(db.CHAT_SESSION_PAGE_SIZE_DEFAULT)
+            )
+        else:
+            try:
+                num = int(val)
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="chat_session_page_size 必须为 1-200 的有效整数",
+                )
+            if num < 1 or num > db.CHAT_SESSION_PAGE_SIZE_MAX:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"chat_session_page_size 必须在 1-{db.CHAT_SESSION_PAGE_SIZE_MAX} 之间",
+                )
+            db.set_global_config_value("chat_session_page_size", str(num))
+            logger.info(f"知识库会话列表每批条数已更新：{num}")
     return get_config()
 
 
@@ -1213,6 +1243,7 @@ async def analyze(data: dict):
 # JSON 端点用普通转发；SSE 端点（chat 消息 / build 进度）用流式逐帧透传。
 # ============================================================================
 
+
 def _agent_unreachable_detail(base: str) -> str:
     return f"无法连接 sida-agent 知识库服务（{base}）。请确认已启动：uv run python main.py --stage serve，或在「配置」页检查服务地址。"
 
@@ -1253,10 +1284,23 @@ def agent_books():
 
 
 @app.get("/api/agent/chat/sessions")
-def agent_chat_sessions_list():
+def agent_chat_sessions_list(
+    limit: int | None = Query(
+        None, ge=1, le=200, description="每批条数，缺省透传给上游（上游缺省=全部）"
+    ),
+    offset: int = Query(0, ge=0, description="起始偏移"),
+):
+    """会话列表代理：透传 limit/offset 到 sida-agent 的分页接口（见其 README 6.10）。
+
+    响应原样返回（含 total/count/limit/offset/has_more），不传参数时行为与旧版一致。"""
     base = _sida_agent_base_url()
+    params = {}
+    if limit is not None:
+        params["limit"] = limit
+    if offset > 0:
+        params["offset"] = offset
     try:
-        r = httpx.get(base + "/chat/sessions", timeout=30.0)
+        r = httpx.get(base + "/chat/sessions", params=params, timeout=30.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1297,7 +1341,9 @@ async def agent_build_estimate(request: Request):
     base = _sida_agent_base_url()
     body = await request.json()
     if not (body.get("subject") or "").strip():
-        raise HTTPException(status_code=400, detail="必须先选择学科（subject 不能为空）")
+        raise HTTPException(
+            status_code=400, detail="必须先选择学科（subject 不能为空）"
+        )
     try:
         r = httpx.post(base + "/build/estimate", json=body, timeout=60.0)
     except httpx.HTTPError:
@@ -1312,7 +1358,9 @@ async def agent_build_submit(request: Request):
     base = _sida_agent_base_url()
     body = await request.json()
     if not (body.get("subject") or "").strip():
-        raise HTTPException(status_code=400, detail="必须先选择学科（subject 不能为空）")
+        raise HTTPException(
+            status_code=400, detail="必须先选择学科（subject 不能为空）"
+        )
     try:
         r = httpx.post(base + "/build", json=body, timeout=60.0)
     except httpx.HTTPError:
@@ -1349,6 +1397,7 @@ def agent_build_task_status(task_id: str):
 
 # ---- SSE 透传端点 ----------------------------------------------------------
 
+
 @app.post("/api/agent/chat/sessions/{session_id}/messages")
 async def agent_chat_message_stream(session_id: str, request: Request):
     """转发一轮对话并以 SSE 逐帧透传（token/reasoning/result/end）。"""
@@ -1364,7 +1413,10 @@ async def agent_chat_message_stream(session_id: str, request: Request):
                 ) as upstream:
                     if upstream.status_code >= 400:
                         raw = await upstream.aread()
-                        err = {"type": "error", "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}"}
+                        err = {
+                            "type": "error",
+                            "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}",
+                        }
                         yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
                         yield "event: end\ndata: {}\n\n"
                         return
@@ -1377,8 +1429,11 @@ async def agent_chat_message_stream(session_id: str, request: Request):
             yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
             yield "event: end\ndata: {}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/agent/build/tasks/{task_id}/events")
@@ -1390,11 +1445,16 @@ async def agent_build_events_stream(task_id: str, since: int = Query(0, ge=0)):
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream(
-                    "GET", base + f"/build/tasks/{task_id}/events", params={"since": since}
+                    "GET",
+                    base + f"/build/tasks/{task_id}/events",
+                    params={"since": since},
                 ) as upstream:
                     if upstream.status_code >= 400:
                         raw = await upstream.aread()
-                        err = {"type": "error", "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}"}
+                        err = {
+                            "type": "error",
+                            "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}",
+                        }
                         yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
                         yield "event: end\ndata: {}\n\n"
                         return
@@ -1407,8 +1467,11 @@ async def agent_build_events_stream(task_id: str, since: int = Query(0, ge=0)):
             yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
             yield "event: end\ndata: {}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # --- Serve frontend static files (production build from dist/) ---
@@ -1422,7 +1485,7 @@ else:
     logger.info("开发模式下请确保 Vite dev server (npm run dev) 正在运行")
 
 if __name__ == "__main__":
-    """ 启动服务器 """
+    """启动服务器"""
     import uvicorn
 
     parser = argparse.ArgumentParser(description="Smart Mistake Lab Server")

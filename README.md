@@ -135,7 +135,7 @@ sida-agent 把初中**物理 / 化学 / 数学**教材 / 讲义 PDF 用视觉大
 | ------ | ---------------------------------------- | ------------------------------- |
 | GET    | `/api/agent/health`                      | 连通性测试（图谱 / 向量规模）                |
 | GET    | `/api/agent/books`                       | 已入库教材清单                         |
-| GET    | `/api/agent/chat/sessions`               | 会话清单                            |
+| GET    | `/api/agent/chat/sessions?limit=&offset=` | 会话清单（透传分页到 sida-agent，SQL 层分批；响应含 `total`/`has_more`） |
 | POST   | `/api/agent/chat/sessions`               | 新建会话（返回 `thread_id`）           |
 | GET    | `/api/agent/chat/sessions/{id}`          | 某会话的历史消息快照                      |
 | POST   | `/api/agent/chat/sessions/{id}/messages` | 发一轮提问，SSE 流式透传（token / reasoning / result） |
@@ -541,8 +541,8 @@ Smart-Mistake-Lab/
 | 方法     | 路径                            | 说明                                                      |
 | ------ | ----------------------------- | ------------------------------------------------------- |
 | GET    | `/api/health`                 | 健康检查                                                    |
-| GET    | `/api/config`                 | 获取配置（图片目录、重点练超时阈值）                                      |
-| PUT    | `/api/config`                 | 保存配置（图片目录、重点练超时阈值）                                      |
+| GET    | `/api/config`                 | 获取配置（图片目录、重点练超时阈值、知识库会话每批条数 `chat_session_page_size`）  |
+| PUT    | `/api/config`                 | 保存配置（图片目录、重点练超时阈值、知识库会话每批条数 `chat_session_page_size`，默认 20、最大 200） |
 | GET    | `/api/ai-config`              | 获取 AI 配置状态（仅展示 .env 中两套配置的 URL/模型/是否已设置 Key，不返回 Key 原文） |
 | PUT    | `/api/ai-config`              | 已废弃：LLM 配置仅由 .env 管理，写请求不再生效                            |
 | GET    | `/api/scan`                   | 扫描图片目录，按学科分组返回已索引/未索引文件列表（含 `subject_order`）            |

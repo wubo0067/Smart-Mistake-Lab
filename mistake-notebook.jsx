@@ -257,7 +257,11 @@ function formatFileSize(bytes) {
 const AgentAPI = {
   async health() { return (await apiFetch('/api/agent/health')).json(); },
   async books() { return (await apiFetch('/api/agent/books')).json(); },
-  async listSessions() { return (await apiFetch('/api/agent/chat/sessions')).json(); },
+  async listSessions(limit, offset = 0) {
+    // 不传 limit 时保持旧行为（上游缺省=全部）；传则走上游 SQL 层分页（README 6.10）
+    const qs = limit ? `?limit=${limit}&offset=${offset}` : '';
+    return (await apiFetch(`/api/agent/chat/sessions${qs}`)).json();
+  },
   async createSession(sessionId) {
     return (await apiFetch('/api/agent/chat/sessions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2629,6 +2633,11 @@ function KbChat({ health, healthLoading }) {
   const serviceDown = health && health.error;
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsTotal, setSessionsTotal] = useState(0);      // 上游回传的会话总数
+  const [sessionsOffset, setSessionsOffset] = useState(0);    // 已加载条数（= 下一页 offset）
+  const [sessionsHasMore, setSessionsHasMore] = useState(false);
+  const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
+  const sessionsPageSizeRef = useRef(20);                     // 每批条数（可配置，默认 20）
   const [currentId, setCurrentId] = useState('');
   const [messages, setMessages] = useState([]);   // {role:'user'|'assistant', content, thinking}
   const [input, setInput] = useState('');
@@ -2637,15 +2646,51 @@ function KbChat({ health, healthLoading }) {
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
 
-  async function loadSessions() {
-    setSessionsLoading(true);
+  // 分批拉取会话列表：loadMore=false 拉首批（替换），true 追加下一页；
+  // refresh=true 用于发完消息后只刷新第一页并与已加载的更旧会话合并（按 thread_id 去重），
+  // 避免会话很多时每轮对话都全量重拉。
+  async function loadSessions({ loadMore = false, refresh = false } = {}) {
+    const limit = sessionsPageSizeRef.current;
+    const offset = loadMore ? sessionsOffset : 0;
+    if (loadMore) setSessionsLoadingMore(true); else setSessionsLoading(true);
+    let needRetryFirstPage = false;
     try {
-      const data = await AgentAPI.listSessions();
-      setSessions(data.sessions || []);
+      const data = await AgentAPI.listSessions(limit, offset);
+      const page = data.sessions || [];
+      const total = data.total ?? page.length;
+      // 越界校正：翻页翻空但库里仍有会话（并发删除等）→ 稍后重置回第一页
+      needRetryFirstPage = offset > 0 && page.length === 0 && total > 0;
+      if (!needRetryFirstPage && offset === 0) {
+        setSessions((prev) => {
+          if (!refresh) return page;
+          const ids = new Set(page.map((s) => s.thread_id));
+          return [...page, ...prev.filter((s) => !ids.has(s.thread_id))];
+        });
+      } else {
+        setSessions((prev) => {
+          const ids = new Set(prev.map((s) => s.thread_id));
+          return [...prev, ...page.filter((s) => !ids.has(s.thread_id))];
+        });
+      }
+      setSessionsTotal(total);
+      setSessionsOffset(offset + page.length);
+      setSessionsHasMore(!!data.has_more);
     } catch (e) { /* 服务未就绪时静默 */ }
-    finally { setSessionsLoading(false); }
+    finally {
+      setSessionsLoading(false);
+      setSessionsLoadingMore(false);
+      if (needRetryFirstPage) loadSessions(); // 越界校正：重新拉第一页
+    }
   }
   useEffect(() => { if (!serviceDown) loadSessions(); }, [serviceDown]);
+
+  // 每批条数可配置（全局配置 chat_session_page_size，默认 20，最大 200）
+  useEffect(() => {
+    API.getConfig().then((c) => {
+      const n = Number(c.chat_session_page_size);
+      if (n >= 1 && n <= 200) sessionsPageSizeRef.current = n;
+    }).catch(() => { });
+  }, []);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -2713,7 +2758,8 @@ function KbChat({ health, healthLoading }) {
     } finally {
       patchLast({ _streaming: false });
       setStreaming(false); abortRef.current = null;
-      loadSessions();
+      // 只刷新第一页（刚发言的会话必在第一页顶部），不再全量重拉
+      loadSessions({ refresh: true });
     }
     function patchLast(patch) {
       setMessages((prev) => {
@@ -2750,6 +2796,16 @@ function KbChat({ health, healthLoading }) {
           ))}
           {!sessionsLoading && sessions.length === 0 && (
             <div style={{ padding: '10px 8px', fontSize: 12.5, color: 'var(--ink-soft)' }}>暂无会话，点「新建」开始</div>
+          )}
+          {sessionsHasMore && (
+            <button className="kb-btn" style={{ margin: '6px 8px' }}
+              onClick={() => loadSessions({ loadMore: true })}
+              disabled={sessionsLoadingMore || streaming}>
+              {sessionsLoadingMore ? <><Loader2 size={14} className="spin" /> 加载中…</> : `加载更多（已加载 ${sessions.length} / 共 ${sessionsTotal}）`}
+            </button>
+          )}
+          {!sessionsHasMore && sessions.length > 0 && (
+            <div style={{ padding: '6px 8px', fontSize: 12, color: 'var(--ink-soft)' }}>已加载全部 {sessionsTotal} 个会话</div>
           )}
         </div>
       </div>
@@ -3269,6 +3325,7 @@ export default function App() {
   // --- sida-agent 知识库服务配置 ---
   const [sidaHostInput, setSidaHostInput] = useState('127.0.0.1');
   const [sidaPortInput, setSidaPortInput] = useState('6173');
+  const [chatPageSizeInput, setChatPageSizeInput] = useState('20'); // 知识库会话列表每批条数（1-200）
   const [sidaSaving, setSidaSaving] = useState(false);
   const [sidaTesting, setSidaTesting] = useState(false);
   const [sidaMsg, setSidaMsg] = useState('');
@@ -3418,6 +3475,8 @@ export default function App() {
       if (m > 0) setFocusMaxPerSubject(m);
       if (c.sida_agent_host) setSidaHostInput(c.sida_agent_host);
       if (c.sida_agent_port) setSidaPortInput(String(c.sida_agent_port));
+      const ps = Number(c.chat_session_page_size);
+      if (ps >= 1 && ps <= 200) setChatPageSizeInput(String(ps));
     }).catch(() => { });
   }
 
@@ -3779,13 +3838,20 @@ export default function App() {
     }
   }
 
-  // 保存 sida-agent 服务地址（全局配置，对所有学生生效），保存后立即测连
+  // 保存 sida-agent 服务地址与会话列表每批条数（全局配置，对所有学生生效），保存后立即测连
   async function saveSidaConfig() {
     setSidaSaving(true); setSidaMsg('');
     try {
+      const ps = parseInt(chatPageSizeInput, 10);
+      if (!isNaN(ps) && (ps < 1 || ps > 200)) {
+        setSidaMsg('会话列表每批条数必须在 1-200 之间');
+        setSidaSaving(false);
+        return;
+      }
       await API.saveConfig({
         sida_agent_host: sidaHostInput.trim() || '127.0.0.1',
         sida_agent_port: sidaPortInput.trim(),
+        chat_session_page_size: isNaN(ps) ? 20 : ps,
       });
       setSidaSaving(false);
       await testSidaConnection();
@@ -4885,6 +4951,12 @@ export default function App() {
                   <input type="number" value={sidaPortInput}
                     onChange={(e) => setSidaPortInput(e.target.value)}
                     placeholder="默认 6173" />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 150, marginBottom: 0 }}>
+                  <label className="field-label">会话列表每批条数</label>
+                  <input type="number" min="1" max="200" value={chatPageSizeInput}
+                    onChange={(e) => setChatPageSizeInput(e.target.value)}
+                    placeholder="默认 20，最大 200" />
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
