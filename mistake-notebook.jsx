@@ -943,6 +943,36 @@ const CSS = `
 .mnb .modal.detail-modal > img {
   margin-top: 14px;
 }
+.mnb .modal.detail-modal {
+  width: min(94vw, 1400px);
+  max-width: 1400px;
+}
+.mnb .detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 24px;
+  align-items: start;
+}
+.mnb .detail-visual,
+.mnb .detail-content { min-width: 0; }
+.mnb .detail-visual { position: sticky; top: 0; }
+.mnb .detail-visual > img {
+  max-height: 78vh;
+  object-fit: contain;
+}
+.mnb .detail-content {
+  max-height: 78vh;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+.mnb .detail-tags { margin-top: 12px; }
+.mnb .detail-tags .tag-row { min-width: 0; align-items: flex-start; }
+.mnb .detail-tags .tag-pill { max-width: 100%; overflow-wrap: anywhere; }
+@media (max-width: 1099px) {
+  .mnb .detail-layout { display: block; }
+  .mnb .detail-visual { position: static; }
+  .mnb .detail-content { max-height: none; overflow: visible; padding-right: 0; }
+}
 .mnb .modal h2 {
   font-family: "Songti SC", "STSong", serif;
   font-size: 19px; margin: 0 0 10px; padding-right: 30px;
@@ -2148,14 +2178,17 @@ function MasteryLight({ mastery, size = 12 }) {
   );
 }
 
-function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, reminderLoading, extraFooter }) {
+function ProblemCard({ problem, imageUrl, onClick, onImageDoubleClick, showOverdue, reminder, reminderLoading, extraFooter }) {
   const isOverdue = showOverdue && problem.is_focus_overdue;
   return (
     <div className={'card' + (isOverdue ? ' card-overdue' : '') + (showOverdue ? ' card-focus-context' : '')} onClick={onClick}>
       {problem.is_focus_practice === 1 && (
         <div className="card-focus-badge">重点练</div>
       )}
-      <div className="card-thumb">
+      <div className="card-thumb"
+        onClick={onImageDoubleClick ? (e) => e.stopPropagation() : undefined}
+        onDoubleClick={onImageDoubleClick ? (e) => { e.stopPropagation(); onImageDoubleClick(); } : undefined}
+        title={onImageDoubleClick ? '双击查看题目详情' : undefined}>
         <img src={imageUrl} alt={problem.title} loading="lazy" />
       </div>
       <div className="card-body">
@@ -5371,7 +5404,8 @@ export default function App() {
                               {group.items.map((p) => (
                                 <ProblemCard key={p.file_path} problem={p}
                                   imageUrl={API.imageUrl(p.file_path)}
-                                  onClick={() => openDetail(p)} />
+                                  onClick={() => openDetail(p)}
+                                  onImageDoubleClick={() => openDetail(p)} />
                               ))}
                             </div>
                           </div>
@@ -5530,17 +5564,40 @@ export default function App() {
 
             <div className="modal detail-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-close" onClick={closeDetailModal}><X size={16} /></div>
-              <img src={API.imageUrl(detail.file_path)} alt={detail.title}
-                onDoubleClick={() => setPreviewSolutionImage(detail.file_path)}
-                style={{ cursor: 'zoom-in' }}
-                title="双击查看大图（滚轮缩放）" />
+              <div className="detail-layout">
+                <div className="detail-visual">
+                  <img src={API.imageUrl(detail.file_path)} alt={detail.title}
+                    onDoubleClick={() => setPreviewSolutionImage(detail.file_path)}
+                    style={{ cursor: 'zoom-in' }}
+                    title="双击查看大图（滚轮缩放）" />
 
-              {/* 位置信息 */}
-              {detailPositionText && (
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-                  <span className="detail-position">{detailPositionText}</span>
+                  {/* 位置信息 */}
+                  {detailPositionText && (
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                      <span className="detail-position">{detailPositionText}</span>
+                    </div>
+                  )}
+                  <div className="detail-tags">
+                    <label className="field-label">知识点标签</label>
+                    <div className="tag-list-vertical">
+                      {(detail.tags || []).map((t) => (
+                        <div key={t} className="tag-row">
+                          <TagPill tag={t} onDelete={removeDetailTag} onEdit={editDetailTag} />
+                        </div>
+                      ))}
+                      {(detail.tags || []).length === 0 && (
+                        <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>还没有标签</span>
+                      )}
+                    </div>
+                    <div className="tag-add-row" style={{ marginBottom: 18 }}>
+                      <input type="text" placeholder="添加知识点，回车确认" value={detailTagInput}
+                        onChange={(e) => setDetailTagInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDetailTag(); } }} />
+                      <button onClick={addDetailTag}><Plus size={14} /></button>
+                    </div>
+                  </div>
                 </div>
-              )}
+                <div className="detail-content">
 
               {/* 可编辑标题 */}
               {editingTitle ? (
@@ -5589,25 +5646,6 @@ export default function App() {
                 {detail.last_practiced_at && (
                   <span className="timestamp">🕐 最近练习 {formatTime(detail.last_practiced_at)}</span>
                 )}
-              </div>
-
-              {/* 标签列表 - 一行一个 */}
-              <label className="field-label">知识点标签</label>
-              <div className="tag-list-vertical">
-                {(detail.tags || []).map((t) => (
-                  <div key={t} className="tag-row">
-                    <TagPill tag={t} onDelete={removeDetailTag} onEdit={editDetailTag} />
-                  </div>
-                ))}
-                {(detail.tags || []).length === 0 && (
-                  <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>还没有标签</span>
-                )}
-              </div>
-              <div className="tag-add-row" style={{ marginBottom: 18 }}>
-                <input type="text" placeholder="添加知识点，回车确认" value={detailTagInput}
-                  onChange={(e) => setDetailTagInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDetailTag(); } }} />
-                <button onClick={addDetailTag}><Plus size={14} /></button>
               </div>
 
               <div className="field solution-section">
@@ -5729,6 +5767,8 @@ export default function App() {
                 </button>
               </div>
               {focusError && <div className="save-msg error" style={{ marginTop: 8 }}>{focusError}</div>}
+                </div>
+              </div>
             </div>
           </div>
         </div>
