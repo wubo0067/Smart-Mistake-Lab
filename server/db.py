@@ -70,16 +70,21 @@ def get_students_db():
 def init_students_db():
     """创建学生注册表；若为空则把历史 data.db 登记为「默认」学生。"""
     conn = get_students_db()
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS students (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
             db_file TEXT NOT NULL,
             created_at TIMESTAMP
         )
-        """
-    )
+        """)
+    # 全局配置表：跨学生共享的配置（如 sida-agent 服务地址），与错题数据无关
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS global_config (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """)
     conn.commit()
     count = conn.execute("SELECT COUNT(*) AS c FROM students").fetchone()["c"]
     if count == 0:
@@ -138,9 +143,7 @@ def create_student(name: str) -> dict:
         )
         sid = cur.lastrowid
         db_file = f"data_s{sid}.db"
-        conn.execute(
-            "UPDATE students SET db_file = ? WHERE id = ?", (db_file, sid)
-        )
+        conn.execute("UPDATE students SET db_file = ? WHERE id = ?", (db_file, sid))
         conn.commit()
     except sqlite3.IntegrityError:
         conn.close()
@@ -380,6 +383,51 @@ def set_config_value(key: str, value: str):
     conn.close()
 
 
+# --- 全局配置（跨学生共享，存 students.db 的 global_config 表） ---
+
+
+def get_global_config_value(key: str) -> str | None:
+    init_students_db()
+    conn = get_students_db()
+    row = conn.execute(
+        "SELECT value FROM global_config WHERE key = ?", (key,)
+    ).fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+
+def set_global_config_value(key: str, value: str):
+    init_students_db()
+    conn = get_students_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO global_config (key, value) VALUES (?, ?)",
+        (key, value),
+    )
+    conn.commit()
+    conn.close()
+
+
+# 知识库会话列表每批拉取条数（分页 PAGE_SIZE）：默认 20，最大 200（与 sida-agent 上游 limit 上限一致）
+CHAT_SESSION_PAGE_SIZE_DEFAULT = 20
+CHAT_SESSION_PAGE_SIZE_MAX = 200
+
+
+def get_chat_session_page_size() -> int:
+    """从全局配置获取知识库会话列表每批条数，默认 20，钳制到 1–200。"""
+    val = get_global_config_value("chat_session_page_size")
+    if val is not None:
+        try:
+            num = int(val)
+            if num < 1:
+                num = 1
+            if num > CHAT_SESSION_PAGE_SIZE_MAX:
+                num = CHAT_SESSION_PAGE_SIZE_MAX
+            return num
+        except (ValueError, TypeError):
+            pass
+    return CHAT_SESSION_PAGE_SIZE_DEFAULT
+
+
 # --- Image CRUD ---
 
 
@@ -586,7 +634,7 @@ def mark_indexed(
     subject: str = "",
     difficulty: int = 3,
 ):
-    """ 将题目标记为已索引，若已存在则更新其元数据。"""
+    """将题目标记为已索引，若已存在则更新其元数据。"""
     conn = get_db()
     storage_path = to_db_image_path(file_path, get_config_value("image_dir") or "")
 
@@ -896,8 +944,15 @@ def get_focus_timeout_hours() -> int:
 
 
 def delete_image(file_path: str):
+    """删除图片索引记录。
+
+    兼容多种路径写法：调用方可能传绝对路径（扫描页）或相对路径（错题库
+    详情页，数据库存储格式），逐一尝试匹配，确保记录一定被删掉。
+    否则索引残留 → 已删除文件的题仍出现在错题库列表中。"""
     conn = get_db()
-    conn.execute("DELETE FROM images WHERE file_path = ?", (file_path,))
+    candidates = _build_path_candidates(file_path)
+    for candidate in candidates:
+        conn.execute("DELETE FROM images WHERE file_path = ?", (candidate,))
     conn.commit()
     conn.close()
 
@@ -940,7 +995,9 @@ def _get_weekday_cn(date_str: str) -> str:
         return ""
 
 
-def get_timeline_days(offset_days: int = 0, limit_days: int = 14) -> tuple[list[dict], bool]:
+def get_timeline_days(
+    offset_days: int = 0, limit_days: int = 14
+) -> tuple[list[dict], bool]:
     """
     按"天"分页，返回每个日期及其包含的练习记录条目。
     使用单 SQL JOIN 查询，避免 N+1 性能问题。
@@ -1204,7 +1261,9 @@ def _compute_token_stats(conn) -> dict:
             "prompt": row["prompt_tokens"] or 0,
             "completion": row["completion_tokens"] or 0,
             "total": row["total_tokens"] or 0,
-            "cached": (row["cached_tokens"] or 0) if "cached_tokens" in row.keys() else 0,
+            "cached": (
+                (row["cached_tokens"] or 0) if "cached_tokens" in row.keys() else 0
+            ),
             "calls": row["calls"] or 0,
         }
 

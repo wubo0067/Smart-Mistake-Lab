@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, Send, Square, MessageSquare, Upload, Activity, FileText, Link2, Images } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 function formatTime(ts) {
   if (!ts) return '';
@@ -228,6 +233,111 @@ const API = {
     return `/api/image-file?path=${encodeURIComponent(filePath)}${sidQ}`;
   }
 };
+
+// ============== 本机文件系统 API（仅用于「选择文件」控件） ==============
+// 浏览器出于安全限制拿不到所选文件的绝对路径，因此改为让后端列本机目录，
+// 用户逐级点选后再把绝对路径回填到表单（sida-agent 需要的是服务端可读路径）。
+
+const FsAPI = {
+  async roots() { return (await apiFetch('/api/fs/roots')).json(); },
+  async list(path) {
+    const q = path ? `?path=${encodeURIComponent(path)}` : '';
+    return (await apiFetch(`/api/fs/list${q}`)).json();
+  },
+};
+
+function formatFileSize(bytes) {
+  if (typeof bytes !== 'number' || !isFinite(bytes)) return '';
+  if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+
+// ============== sida-agent 知识库 API（经本后端 /api/agent/* 代理） ==============
+
+const AgentAPI = {
+  async health() { return (await apiFetch('/api/agent/health')).json(); },
+  async books() { return (await apiFetch('/api/agent/books')).json(); },
+  async listSessions(limit, offset = 0) {
+    // 不传 limit 时保持旧行为（上游缺省=全部）；传则走上游 SQL 层分页（README 6.10）
+    const qs = limit ? `?limit=${limit}&offset=${offset}` : '';
+    return (await apiFetch(`/api/agent/chat/sessions${qs}`)).json();
+  },
+  async createSession(sessionId) {
+    return (await apiFetch('/api/agent/chat/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sessionId ? { session_id: sessionId } : {})
+    })).json();
+  },
+  async getSession(id) { return (await apiFetch(`/api/agent/chat/sessions/${encodeURIComponent(id)}`)).json(); },
+  async buildEstimate(payload) {
+    return (await apiFetch('/api/agent/build/estimate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })).json();
+  },
+  // 提交建库：409 等错误带出结构化 detail（message / estimate / active_task_id）
+  async buildSubmit(payload) {
+    const r = await apiFetch('/api/agent/build', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return r.json();
+  },
+  async buildTasks() { return (await apiFetch('/api/agent/build/tasks')).json(); },
+  async buildTask(id) { return (await apiFetch(`/api/agent/build/tasks/${encodeURIComponent(id)}`)).json(); },
+  buildEventsUrl(id, since = 0) {
+    return `/api/agent/build/tasks/${encodeURIComponent(id)}/events?since=${since}`;
+  }
+};
+
+// 从 apiFetch 抛错的响应里取结构化 detail 的辅助：apiFetch 只把 detail 转成 Error.message，
+// 409 的 dict detail 会被 JSON.stringify 丢信息，因此 build 提交单独走这个函数。
+async function agentBuildSubmitRaw(payload) {
+  const r = await fetch('/api/agent/build', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  let body = null;
+  try { body = await r.json(); } catch (e) { /* ignore */ }
+  return { ok: r.ok, status: r.status, body };
+}
+
+// 手工解析 SSE 流（EventSource 不支持 POST）。逐帧回调 onEvent，收到 event: end 或流关闭即返回。
+// 帧格式：`data: <json>\n\n` 若干 + 收尾 `event: end\ndata: {}\n\n`。
+async function readSSEStream(response, onEvent, signal) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buf = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // 按空行切帧（SSE 帧以 \n\n 分隔）
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        let eventName = 'message';
+        const dataLines = [];
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
+        }
+        if (eventName === 'end') return;
+        if (dataLines.length === 0) continue;
+        const dataStr = dataLines.join('\n');
+        if (!dataStr) continue;
+        let evt;
+        try { evt = JSON.parse(dataStr); } catch (e) { continue; }
+        onEvent(evt);
+        if (signal && signal.aborted) return;
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch (e) { /* ignore */ }
+  }
+}
 
 // ============== 学生切换器（下拉菜单） ==============
 
@@ -832,6 +942,36 @@ const CSS = `
 }
 .mnb .modal.detail-modal > img {
   margin-top: 14px;
+}
+.mnb .modal.detail-modal {
+  width: min(94vw, 1400px);
+  max-width: 1400px;
+}
+.mnb .detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 24px;
+  align-items: start;
+}
+.mnb .detail-visual,
+.mnb .detail-content { min-width: 0; }
+.mnb .detail-visual { position: sticky; top: 0; }
+.mnb .detail-visual > img {
+  max-height: 78vh;
+  object-fit: contain;
+}
+.mnb .detail-content {
+  max-height: 78vh;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+.mnb .detail-tags { margin-top: 12px; }
+.mnb .detail-tags .tag-row { min-width: 0; align-items: flex-start; }
+.mnb .detail-tags .tag-pill { max-width: 100%; overflow-wrap: anywhere; }
+@media (max-width: 1099px) {
+  .mnb .detail-layout { display: block; }
+  .mnb .detail-visual { position: static; }
+  .mnb .detail-content { max-height: none; overflow: visible; padding-right: 0; }
 }
 .mnb .modal h2 {
   font-family: "Songti SC", "STSong", serif;
@@ -1607,6 +1747,298 @@ const CSS = `
   .mnb .similar-item-thumb { width: 100%; height: 200px; min-width: 0; }
   .mnb .similar-item-side { border-left: none; padding-left: 0; justify-content: flex-start; }
 }
+
+/* ============ 知识库（sida-agent） ============ */
+/* 数字输入原本只有一条下划线，宽度沿用浏览器默认（约 20 字符），会把整行撑开、列宽无法对齐；
+   这里补齐与文本输入一致的宽度 / 内边距，并允许在 grid / flex 中收缩。 */
+.mnb input[type="number"] {
+  width: 100%; min-width: 0; border: none; border-bottom: 1.5px solid var(--grid);
+  background: transparent; padding: 7px 2px; font-size: 14px;
+  font-family: inherit; color: var(--ink); outline: none;
+}
+.mnb input[type="number"]:focus { border-bottom-color: var(--margin); }
+.mnb input[type="password"], .mnb select {
+  border-bottom: 1.5px solid var(--grid);
+}
+.mnb .kb-head {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.mnb .kb-subtabs { display: flex; gap: 6px; }
+.mnb .kb-subtab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 14px; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid var(--grid); background: var(--paper); color: var(--ink-soft);
+  font-size: 13.5px; font-weight: 700; font-family: inherit;
+}
+.mnb .kb-subtab.active { border-color: var(--ink); background: var(--ink); color: #fff; }
+.mnb .kb-subtab:hover:not(.active) { border-color: var(--ink-soft); }
+
+.mnb .kb-banner {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px;
+  border: 1.5px solid var(--grid);
+}
+.mnb .kb-banner.ok { color: #1f8a55; background: #E9F7EF; border-color: #bfe4cd; }
+.mnb .kb-banner.error { color: var(--margin); background: #FBECEC; border-color: #e6bcbc; }
+.mnb .kb-banner.info { color: var(--ink-soft); background: #F1F2F5; }
+.mnb .kb-banner-retry {
+  margin-left: 6px; border: none; background: none; color: inherit; cursor: pointer;
+  font-weight: 700; text-decoration: underline; font-family: inherit; font-size: 12.5px;
+}
+
+.mnb .kb-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;
+}
+.mnb .kb-toolbar-title { font-size: 14px; font-weight: 700; color: var(--ink); }
+.mnb .kb-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 13px; border-radius: 8px; cursor: pointer;
+  border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink);
+  font-size: 13px; font-weight: 700; font-family: inherit;
+}
+.mnb .kb-btn:hover:not(:disabled) { background: var(--ink); color: #fff; }
+.mnb .kb-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.mnb .kb-btn.primary { border-color: var(--accent-2); background: var(--accent-2); color: #fff; }
+.mnb .kb-btn.primary:hover:not(:disabled) { filter: brightness(0.94); background: var(--accent-2); color: #fff; }
+.mnb .kb-btn.stop { border-color: var(--margin); color: var(--margin); }
+.mnb .kb-btn.stop:hover:not(:disabled) { background: var(--margin); color: #fff; }
+.mnb .kb-link-btn {
+  border: none; background: none; color: var(--ink-soft); cursor: pointer;
+  font-size: 12.5px; font-weight: 600; font-family: inherit; padding: 2px 0;
+}
+.mnb .kb-link-btn:hover { color: var(--ink); }
+
+/* 教材清单 */
+.mnb .kb-books-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 4px; }
+.mnb .kb-book-card {
+  border: 1.5px solid var(--grid); border-radius: 10px; padding: 14px 16px; background: var(--card);
+}
+.mnb .kb-book-name { font-size: 14.5px; font-weight: 700; color: var(--ink); margin-bottom: 6px; word-break: break-all; }
+.mnb .kb-book-id { font-size: 11.5px; color: var(--ink-soft); font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 对话 */
+.mnb .kb-chat-layout { display: flex; gap: 16px; align-items: stretch; height: calc(100vh - 240px); min-height: 520px; }
+.mnb .kb-sessions { width: 220px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px dashed var(--grid); padding-right: 16px; }
+.mnb .kb-session-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.mnb .kb-session-item {
+  padding: 9px 10px; border-radius: 8px; cursor: pointer; border: 1.5px solid transparent;
+}
+.mnb .kb-session-item:hover { background: var(--paper); }
+.mnb .kb-session-item.active { border-color: var(--ink); background: var(--paper); }
+.mnb .kb-session-title { font-size: 13px; font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mnb .kb-session-meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.mnb .kb-chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.mnb .kb-messages { flex: 1; overflow-y: auto; padding: 4px 2px 12px; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.mnb .kb-turn {
+  position: relative; display: flex; flex-direction: column; gap: 14px;
+  padding-top: 22px; border-top: 2px dashed var(--grid);
+}
+.mnb .kb-turn:first-child { padding-top: 0; border-top: none; }
+.mnb .kb-turn-label {
+  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+  background: #EAF4F1; border: 1.5px solid var(--accent-2); border-radius: 999px;
+  padding: 1px 14px; font-size: 11.5px; font-weight: 800; color: #237a6c;
+  letter-spacing: 1px; white-space: nowrap;
+}
+.mnb .kb-msg { display: flex; flex-direction: column; }
+.mnb .kb-msg-role {
+  align-self: flex-start; display: inline-flex; align-items: center;
+  font-size: 15px; font-weight: 800; letter-spacing: 1px;
+  margin-bottom: 6px; padding: 1px 10px; border-radius: 8px;
+}
+.mnb .kb-msg.user { border-left: 3px solid #1F7A3D; padding-left: 10px; }
+.mnb .kb-msg.user .kb-msg-role { color: #1F7A3D; background: #E6F4EA; }
+.mnb .kb-msg-user { font-size: 16.5px; line-height: 1.65; font-weight: 700; color: var(--ink); white-space: pre-wrap; }
+.mnb .kb-msg.assistant { align-self: stretch; border-left: 3px solid var(--margin); padding-left: 10px; }
+.mnb .kb-msg.assistant .kb-msg-role { color: var(--margin); background: #FDECEA; }
+.mnb .kb-msg.assistant .kb-md { font-size: 14px; line-height: 1.7; color: var(--ink); }
+.mnb .kb-thinking { margin-bottom: 6px; font-size: 12px; color: var(--ink-soft); }
+.mnb .kb-thinking summary { cursor: pointer; font-weight: 600; }
+.mnb .kb-thinking > div { margin-top: 4px; padding: 6px 8px; background: var(--paper); border-radius: 6px; white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
+.mnb .kb-streaming-hint { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+.mnb .kb-msg-meta { font-size: 11.5px; color: var(--ink-soft); margin-top: 6px; }
+.mnb .kb-composer { display: flex; gap: 10px; align-items: flex-end; border-top: 1px dashed var(--grid); padding-top: 12px; margin-top: 8px; flex-shrink: 0; }
+.mnb .kb-input {
+  flex: 1; min-height: 60px;
+  border: 2px solid var(--ink); border-bottom-width: 2px; border-radius: 10px;
+  background: #fff; padding: 10px 12px; resize: vertical;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.mnb .kb-input:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(76, 154, 142, 0.15); }
+.mnb .kb-input::placeholder { color: #a8b0bd; }
+
+/* Markdown 内容 */
+.mnb .kb-md > *:first-child { margin-top: 0; }
+.mnb .kb-md > *:last-child { margin-bottom: 0; }
+.mnb .kb-md p { margin: 0 0 8px; }
+.mnb .kb-md h1, .mnb .kb-md h2, .mnb .kb-md h3 { margin: 12px 0 6px; font-size: 15px; }
+.mnb .kb-md ul, .mnb .kb-md ol { margin: 0 0 8px; padding-left: 22px; }
+.mnb .kb-md li { margin: 2px 0; }
+.mnb .kb-md code { background: var(--paper); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; font-family: monospace; }
+.mnb .kb-md pre { background: var(--paper); padding: 10px 12px; border-radius: 8px; overflow-x: auto; margin: 0 0 8px; }
+.mnb .kb-md pre code { background: none; padding: 0; }
+.mnb .kb-md blockquote { border-left: 3px solid var(--grid); margin: 0 0 8px; padding: 2px 12px; color: var(--ink-soft); }
+.mnb .kb-md table { border-collapse: collapse; margin: 0 0 8px; font-size: 13px; display: block; width: max-content; max-width: 100%; overflow-x: auto; }
+.mnb .kb-md th, .mnb .kb-md td { border: 1px solid #B9C6D8; padding: 6px 12px; text-align: left; vertical-align: middle; }
+.mnb .kb-md th { background: #EEF3FA; font-weight: 700; white-space: nowrap; }
+.mnb .kb-md tr:nth-child(even) td { background: #F7FAFD; }
+.mnb .kb-md a { color: var(--accent-2); }
+.mnb .kb-md img { max-width: 100%; border-radius: 6px; }
+
+/* 关联教材原图：缩略图一行（横向滚动），点击放大 + 左右翻页 */
+.mnb .kb-textbook-images { margin-top: 10px; }
+.mnb .kb-textbook-images-head {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-bottom: 6px;
+}
+.mnb .kb-thumb-strip {
+  display: flex; flex-direction: row; flex-wrap: nowrap; gap: 8px;
+  overflow-x: auto; padding-bottom: 6px;
+}
+.mnb .kb-thumb {
+  flex: 0 0 auto; width: 96px; padding: 0; border: 1.5px solid var(--grid);
+  border-radius: 8px; background: var(--card); cursor: zoom-in; overflow: hidden;
+  font-family: inherit; text-align: center;
+}
+.mnb .kb-thumb:hover { border-color: var(--accent-2); box-shadow: 0 2px 8px var(--shadow); }
+.mnb .kb-thumb img {
+  display: block; width: 96px; height: 120px; object-fit: cover; object-position: top;
+}
+.mnb .kb-thumb-label {
+  display: block; font-size: 11px; color: var(--ink-soft); padding: 3px 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 导入 */
+.mnb .kb-build-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.mnb .kb-build-form { flex: 1; min-width: 320px; }
+.mnb .kb-build-progress { flex: 1; min-width: 320px; border-left: 1px dashed var(--grid); padding-left: 20px; }
+
+/* 表单分区：教材文件 / 教材信息 / 高级选项 */
+.mnb .kb-form-section { margin-bottom: 16px; }
+.mnb .kb-form-section-title {
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 13.5px; font-weight: 700; color: var(--ink);
+  margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px dashed var(--grid);
+}
+.mnb .kb-form-advanced { margin-bottom: 14px; }
+.mnb .kb-field-hint { font-size: 11.5px; color: var(--ink-soft); margin-top: 6px; line-height: 1.5; }
+
+/* 路径行：输入框占满、按钮不被压缩 */
+.mnb .kb-path-row { display: flex; gap: 10px; align-items: flex-end; }
+.mnb .kb-path-row > input[type="text"] { flex: 1; min-width: 0; }
+.mnb .kb-path-row > .kb-btn { flex-shrink: 0; }
+
+/* 教材信息：显名自适应 + 页码固定窄列 + 学科一列，底部基线对齐 */
+.mnb .kb-form-grid {
+  display: grid; gap: 10px 14px; align-items: end;
+  grid-template-columns: minmax(0, 1fr) 84px 84px 112px;
+}
+.mnb .kb-form-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mnb .kb-form-grid .field { margin-bottom: 0; }
+.mnb .kb-select {
+  width: 100%; padding: 7px 9px; border: 1.5px solid var(--grid); border-radius: 8px;
+  background: #fff; font-family: inherit; font-size: 14px; color: var(--ink);
+  outline: none; cursor: pointer;
+}
+.mnb .kb-select:focus { border-color: var(--margin); }
+.mnb .kb-estimate { margin-top: 14px; border: 1.5px solid var(--grid); border-radius: 10px; padding: 12px 14px; background: var(--paper); }
+.mnb .kb-estimate-title { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); margin-bottom: 8px; }
+.mnb .kb-estimate-grid { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--ink); }
+.mnb .kb-estimate-grid b { color: var(--margin); }
+.mnb .kb-estimate-total { width: 100%; margin-top: 4px; }
+.mnb .kb-hint { font-size: 12px; color: #a97f12; margin-top: 8px; }
+.mnb .kb-notice { font-size: 12.5px; color: var(--accent-2); margin-top: 10px; font-weight: 600; }
+.mnb .kb-status-line { font-size: 13px; margin-bottom: 10px; }
+.mnb .kb-status-badge {
+  display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 2px 10px;
+  border: 1.5px solid currentColor; text-transform: uppercase;
+}
+.mnb .kb-status-badge.running { color: #3b6cc4; background: #EAF1FC; }
+.mnb .kb-status-badge.queued { color: #7b8494; background: #F1F2F5; }
+.mnb .kb-status-badge.done { color: #1f8a55; background: #E9F7EF; }
+.mnb .kb-status-badge.failed { color: var(--margin); background: #FBECEC; }
+.mnb .kb-status-badge.cancelled { color: #a97f12; background: #FBF3DC; }
+.mnb .kb-progress { margin-bottom: 12px; }
+.mnb .kb-progress-head { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-soft); margin-bottom: 4px; }
+.mnb .kb-progress-track { height: 8px; border-radius: 999px; background: var(--grid); overflow: hidden; }
+.mnb .kb-progress-fill { height: 100%; background: var(--accent-2); border-radius: 999px; transition: width 0.3s ease; }
+.mnb .kb-progress-fill.active { background: linear-gradient(90deg, var(--accent-2), #6fb8ac); }
+.mnb .kb-log { margin-top: 12px; max-height: 260px; overflow-y: auto; background: #2b2b2b; border-radius: 8px; padding: 10px 12px; }
+.mnb .kb-log-line { font-family: monospace; font-size: 11.5px; color: #d7d7d7; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.mnb .kb-tasks-history { margin-top: 8px; }
+.mnb .kb-task-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 12.5px;
+}
+.mnb .kb-task-row:hover { background: var(--paper); }
+.mnb .kb-task-id { font-family: monospace; color: var(--ink-soft); flex-shrink: 0; }
+.mnb .kb-task-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.mnb .kb-task-time { color: var(--ink-soft); flex-shrink: 0; }
+
+/* 本机文件选择弹窗 */
+.mnb .kb-picker { max-width: 780px; display: flex; flex-direction: column; overflow: hidden; }
+.mnb .kb-picker h2 { margin-bottom: 12px; }
+.mnb .kb-picker-bar { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 10px; }
+.mnb .kb-picker-bar > .kb-btn { flex-shrink: 0; }
+.mnb .kb-picker-bar > input[type="text"] {
+  flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+}
+.mnb .kb-picker-body { display: flex; gap: 12px; min-height: 280px; max-height: 50vh; }
+.mnb .kb-picker-side {
+  width: 136px; flex-shrink: 0; overflow-y: auto; padding-right: 10px;
+  border-right: 1px dashed var(--grid); display: flex; flex-direction: column; gap: 4px;
+}
+.mnb .kb-picker-side-title {
+  font-size: 11.5px; font-weight: 700; color: var(--ink-soft); letter-spacing: .5px; margin-bottom: 2px;
+}
+.mnb .kb-picker-drive {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 7px;
+  border: 1.5px solid transparent; background: none; cursor: pointer; text-align: left;
+  color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 600;
+}
+.mnb .kb-picker-drive:hover { background: var(--paper); }
+.mnb .kb-picker-drive.active { border-color: var(--ink); background: var(--paper); }
+.mnb .kb-picker-list { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.mnb .kb-picker-row {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 9px;
+  border: 1.5px solid transparent; border-radius: 7px; background: none; cursor: pointer;
+  color: var(--ink); font-family: inherit; font-size: 13.5px; text-align: left;
+}
+.mnb .kb-picker-row:hover { background: var(--paper); }
+.mnb .kb-picker-row.selected { border-color: var(--accent-2); background: #EAF4F1; }
+.mnb .kb-picker-icon { flex-shrink: 0; color: var(--ink-soft); }
+.mnb .kb-picker-row.dir .kb-picker-icon { color: #c99a2e; }
+.mnb .kb-picker-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mnb .kb-picker-size { flex-shrink: 0; font-size: 11.5px; color: var(--ink-soft); }
+.mnb .kb-picker-arrow { flex-shrink: 0; color: var(--ink-soft); }
+.mnb .kb-picker-hint { display: flex; align-items: center; gap: 6px; padding: 14px 10px; font-size: 12.5px; color: var(--ink-soft); }
+.mnb .kb-picker-hint.error { color: var(--margin); }
+.mnb .kb-picker-foot {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  border-top: 1px dashed var(--grid); padding-top: 12px;
+}
+.mnb .kb-picker-foot > .kb-btn { flex-shrink: 0; }
+.mnb .kb-picker-selected {
+  flex: 1; min-width: 0; font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@media (max-width: 720px) {
+  .mnb .kb-chat-layout { flex-direction: column; height: auto; min-height: 0; }
+  .mnb .kb-messages { max-height: 60vh; }
+  .mnb .kb-sessions { width: 100%; border-right: none; padding-right: 0; border-bottom: 1px dashed var(--grid); padding-bottom: 12px; max-height: 200px; }
+  .mnb .kb-build-progress { border-left: none; padding-left: 0; border-top: 1px dashed var(--grid); padding-top: 16px; }
+  /* 窄屏：教材信息改为两列，路径行按钮单独一行 */
+  .mnb .kb-form-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .mnb .kb-grid-name { grid-column: 1 / -1; }
+  .mnb .kb-path-row { flex-wrap: wrap; }
+  .mnb .kb-path-row > input[type="text"] { flex: 1 1 100%; }
+  .mnb .kb-picker-body { flex-direction: column; max-height: 56vh; }
+  .mnb .kb-picker-side {
+    width: 100%; border-right: none; padding-right: 0;
+    border-bottom: 1px dashed var(--grid); padding-bottom: 8px;
+    flex-direction: row; flex-wrap: wrap; gap: 6px; max-height: 92px;
+  }
+}
 `;
 
 // ============== TAG PILL (with inline editing) ==============
@@ -1746,14 +2178,17 @@ function MasteryLight({ mastery, size = 12 }) {
   );
 }
 
-function ProblemCard({ problem, imageUrl, onClick, showOverdue, reminder, reminderLoading, extraFooter }) {
+function ProblemCard({ problem, imageUrl, onClick, onImageDoubleClick, showOverdue, reminder, reminderLoading, extraFooter }) {
   const isOverdue = showOverdue && problem.is_focus_overdue;
   return (
     <div className={'card' + (isOverdue ? ' card-overdue' : '') + (showOverdue ? ' card-focus-context' : '')} onClick={onClick}>
       {problem.is_focus_practice === 1 && (
         <div className="card-focus-badge">重点练</div>
       )}
-      <div className="card-thumb">
+      <div className="card-thumb"
+        onClick={onImageDoubleClick ? (e) => e.stopPropagation() : undefined}
+        onDoubleClick={onImageDoubleClick ? (e) => { e.stopPropagation(); onImageDoubleClick(); } : undefined}
+        title={onImageDoubleClick ? '双击查看题目详情' : undefined}>
         <img src={imageUrl} alt={problem.title} loading="lazy" />
       </div>
       <div className="card-body">
@@ -2070,6 +2505,843 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
   );
 }
 
+// ============== 知识库 tab（sida-agent 集成） ==============
+
+const KB_SUBJECTS = [
+  { value: 'physics', label: '物理' },
+  { value: 'chemistry', label: '化学' },
+  { value: 'math', label: '数学' },
+];
+
+// Markdown + LaTeX 公式渲染（sida-agent 回答含 $...$ / $$...$$ 与来源标注）
+// memo：解析 markdown + KaTeX 排版开销大，text 未变时跳过重渲染（否则每次敲字都会全量重解析）
+const KbMarkdown = React.memo(function KbMarkdown({ text }) {
+  return (
+    <div className="kb-md">
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {text || ''}
+      </ReactMarkdown>
+    </div>
+  );
+});
+
+function KbServiceBanner({ health, healthLoading, onRetry }) {
+  if (healthLoading) {
+    return <div className="kb-banner info"><Loader2 size={14} className="spin" /> 正在连接知识库服务…</div>;
+  }
+  if (health && health.error) {
+    return (
+      <div className="kb-banner error">
+        <AlertCircle size={14} /> {health.error}
+        <button className="kb-banner-retry" onClick={onRetry}>重试</button>
+      </div>
+    );
+  }
+  if (health) {
+    return (
+      <div className="kb-banner ok">
+        <Link2 size={14} /> 已连接 · 图谱 {health.graph_nodes} 节点 / 向量 {health.vector_count} 条
+      </div>
+    );
+  }
+  return null;
+}
+
+// ---- 子视图①：教材清单 ----
+function KbBooks({ health, healthLoading, onRetry }) {
+  const [books, setBooks] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function load() {
+    setLoading(true); setError('');
+    try {
+      const data = await AgentAPI.books();
+      setBooks(data.books || []);
+    } catch (e) {
+      setError(e.message || '加载失败'); setBooks([]);
+    } finally { setLoading(false); }
+  }
+  useEffect(() => { if (health && !health.error) load(); }, [health]);
+
+  return (
+    <div>
+      <div className="kb-toolbar">
+        <span className="kb-toolbar-title">入库教材（{books.length}）</span>
+        <button className="kb-btn" onClick={() => { onRetry && onRetry(); load(); }} disabled={loading || healthLoading}>
+          {loading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />} 刷新
+        </button>
+      </div>
+      {error && <div className="save-msg error" style={{ marginTop: 8 }}>{error}</div>}
+      {!error && !loading && books.length === 0 && (
+        <div className="empty"><BookOpen size={36} /><p>知识库中暂无教材</p>
+          <p style={{ fontSize: 13 }}>到「导入」子页把教材 PDF 灌入知识库</p></div>
+      )}
+      <div className="kb-books-grid">
+        {books.map((b) => (
+          <div key={b.pdf_id} className="kb-book-card">
+            <div className="kb-book-name"><BookOpen size={15} style={{ verticalAlign: -2, marginRight: 5 }} />{b.name}</div>
+            <div className="kb-book-id" title={b.pdf_id}>pdf_id: {b.pdf_id}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// 把知识库回答末尾的「【教材原图】」区块拆出来：正文 + 图片缩略图列表。
+// sida-agent 的答案 Markdown 以「---」+「## 【教材原图】」+ 若干 **教材第 N 页** /
+// ![..](url) 结尾（见其 storage/image_store.render_image_section）；URL 经后端改写为
+// 指向 sida-agent /pdf_images 静态挂载的绝对地址，浏览器可直接加载。
+const KB_IMAGE_SECTION_RE = /\n-{3,}\s*\n+#{1,6}\s*【教材原图】/;
+function splitKbAnswer(text) {
+  if (!text) return { body: text || '', images: [] };
+  const m = KB_IMAGE_SECTION_RE.exec(text);
+  if (!m) return { body: text, images: [] };
+  const body = text.slice(0, m.index).replace(/\n-{3,}\s*$/, '').trimEnd();
+  const section = text.slice(m.index);
+  const images = [];
+  const imgRe = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let g;
+  while ((g = imgRe.exec(section))) {
+    const alt = (g[1] || '').trim();
+    images.push({ url: g[2], label: alt || `图 ${images.length + 1}` });
+  }
+  return { body, images };
+}
+
+// 单条消息（用户提问 / 知识库回答）的渲染；供轮次分组使用
+// memo：输入框敲字会重渲染整个 KbChat，消息对象引用未变时跳过，避免全量重排 markdown
+const KbMsgNode = React.memo(function KbMsgNode({ m }) {
+  // 关联教材原图：点缩略图放大，左右方向键 / 箭头翻页（-1 = 预览关闭）
+  const [previewIdx, setPreviewIdx] = useState(-1);
+  const isAssistant = m.role === 'assistant';
+  const split = isAssistant ? splitKbAnswer(m.content) : { body: m.content, images: [] };
+  const images = split.images;
+  return (
+    <div className={'kb-msg ' + m.role}>
+      <div className="kb-msg-role">{m.role === 'user' ? '我' : '知识库'}</div>
+      {isAssistant && m.thinking ? (
+        <details className="kb-thinking"><summary>思考过程</summary><div>{m.thinking}</div></details>
+      ) : null}
+      {isAssistant
+        ? <KbMarkdown text={split.body} />
+        : <div className="kb-msg-user">{m.content}</div>}
+      {m._streaming && !m.content && <span className="kb-streaming-hint"><Loader2 size={12} className="spin" /> 生成中…</span>}
+      {isAssistant && images.length > 0 && (
+        <div className="kb-textbook-images">
+          <div className="kb-textbook-images-head">
+            <Images size={13} /> 关联教材原图（{images.length}）· 点击放大，← / → 翻页
+          </div>
+          <div className="kb-thumb-strip">
+            {images.map((im, i) => (
+              <button key={im.url + '#' + i} type="button" className="kb-thumb" title={im.label}
+                onClick={() => setPreviewIdx(i)}>
+                <img src={im.url} alt={im.label} loading="lazy" />
+                <span className="kb-thumb-label">{im.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {m.meta && (m.meta.subject || m.meta.concept) && (
+        <div className="kb-msg-meta">学科：{m.meta.subject || '—'}{m.meta.concept ? ` · 概念：${m.meta.concept}` : ''}</div>
+      )}
+      {isAssistant && previewIdx >= 0 && images[previewIdx] && (
+        <ZoomableImagePreview
+          src={images[previewIdx].url}
+          alt={images[previewIdx].label || '教材原图'}
+          images={images.map((im) => im.url)}
+          index={previewIdx}
+          onNavigate={(i) => setPreviewIdx(Math.max(0, Math.min(images.length - 1, i)))}
+          onClose={() => setPreviewIdx(-1)}
+        />
+      )}
+    </div>
+  );
+});
+
+// ---- 子视图②：多轮对话（SSE 流式） ----
+function KbChat({ health, healthLoading }) {
+  const serviceDown = health && health.error;
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsTotal, setSessionsTotal] = useState(0);      // 上游回传的会话总数
+  const [sessionsOffset, setSessionsOffset] = useState(0);    // 已加载条数（= 下一页 offset）
+  const [sessionsHasMore, setSessionsHasMore] = useState(false);
+  const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
+  const sessionsPageSizeRef = useRef(20);                     // 每批条数（可配置，默认 20）
+  const [currentId, setCurrentId] = useState('');
+  const [messages, setMessages] = useState([]);   // {role:'user'|'assistant', content, thinking}
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const [error, setError] = useState('');
+  const abortRef = useRef(null);
+  const scrollRef = useRef(null);
+
+  // 分批拉取会话列表：loadMore=false 拉首批（替换），true 追加下一页；
+  // refresh=true 用于发完消息后只刷新第一页并与已加载的更旧会话合并（按 thread_id 去重），
+  // 避免会话很多时每轮对话都全量重拉。
+  async function loadSessions({ loadMore = false, refresh = false } = {}) {
+    const limit = sessionsPageSizeRef.current;
+    const offset = loadMore ? sessionsOffset : 0;
+    if (loadMore) setSessionsLoadingMore(true); else setSessionsLoading(true);
+    let needRetryFirstPage = false;
+    try {
+      const data = await AgentAPI.listSessions(limit, offset);
+      const page = data.sessions || [];
+      const total = data.total ?? page.length;
+      // 越界校正：翻页翻空但库里仍有会话（并发删除等）→ 稍后重置回第一页
+      needRetryFirstPage = offset > 0 && page.length === 0 && total > 0;
+      if (!needRetryFirstPage && offset === 0) {
+        setSessions((prev) => {
+          if (!refresh) return page;
+          const ids = new Set(page.map((s) => s.thread_id));
+          return [...page, ...prev.filter((s) => !ids.has(s.thread_id))];
+        });
+      } else {
+        setSessions((prev) => {
+          const ids = new Set(prev.map((s) => s.thread_id));
+          return [...prev, ...page.filter((s) => !ids.has(s.thread_id))];
+        });
+      }
+      setSessionsTotal(total);
+      setSessionsOffset(offset + page.length);
+      setSessionsHasMore(!!data.has_more);
+    } catch (e) { /* 服务未就绪时静默 */ }
+    finally {
+      setSessionsLoading(false);
+      setSessionsLoadingMore(false);
+      if (needRetryFirstPage) loadSessions(); // 越界校正：重新拉第一页
+    }
+  }
+  useEffect(() => { if (!serviceDown) loadSessions(); }, [serviceDown]);
+
+  // 每批条数可配置（全局配置 chat_session_page_size，默认 20，最大 200）
+  useEffect(() => {
+    API.getConfig().then((c) => {
+      const n = Number(c.chat_session_page_size);
+      if (n >= 1 && n <= 200) sessionsPageSizeRef.current = n;
+    }).catch(() => { });
+  }, []);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, streaming]);
+
+  async function openSession(id) {
+    if (streaming) return;
+    setCurrentId(id); setError('');
+    if (!id) { setMessages([]); return; }
+    try {
+      const data = await AgentAPI.getSession(id);
+      setMessages((data.messages || []).map((m) => ({
+        role: m.role === 'human' ? 'user' : 'assistant', content: m.content
+      })));
+    } catch (e) { setMessages([]); setError(e.message || '读取会话失败'); }
+  }
+
+  async function newSession() {
+    if (streaming) return;
+    try {
+      const data = await AgentAPI.createSession();
+      const id = data.thread_id;
+      setSessions((s) => [{ thread_id: id, first_question: '（新会话）', turns: 0, updated_at: '' }, ...s]);
+      setCurrentId(id); setMessages([]); setError('');
+    } catch (e) { setError(e.message || '新建会话失败'); }
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || streaming) return;
+    setError('');
+    // 懒创建会话
+    let sid = currentId;
+    if (!sid) {
+      try { const d = await AgentAPI.createSession(); sid = d.thread_id; setCurrentId(sid); }
+      catch (e) { setError(e.message || '无法创建会话'); return; }
+    }
+    setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: text }, { role: 'assistant', content: '', thinking: '', _streaming: true }]);
+    setStreaming(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    let acc = ''; let think = '';
+    try {
+      const resp = await fetch(`/api/agent/chat/sessions/${encodeURIComponent(sid)}/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, stream: true }), signal: ctrl.signal
+      });
+      if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status} ${t.slice(0, 200)}`);
+      }
+      await readSSEStream(resp, (evt) => {
+        if (evt.type === 'token') { acc += evt.text || ''; patchLast({ content: acc }); }
+        else if (evt.type === 'reasoning') { think += evt.text || ''; patchLast({ thinking: think }); }
+        else if (evt.type === 'result') {
+          const r = evt.data || {};
+          if (r.reply) acc = r.reply;
+          patchLast({ content: acc, _streaming: false, meta: { subject: r.target_subject, concept: r.target_concept, answer_path: r.answer_path } });
+        }
+        else if (evt.type === 'error') { setError(evt.detail || '流式返回错误'); patchLast({ _streaming: false }); }
+      }, ctrl.signal);
+    } catch (e) {
+      if (e.name !== 'AbortError') setError(e.message || '对话请求失败');
+    } finally {
+      patchLast({ _streaming: false });
+      setStreaming(false); abortRef.current = null;
+      // 只刷新第一页（刚发言的会话必在第一页顶部），不再全量重拉
+      loadSessions({ refresh: true });
+    }
+    function patchLast(patch) {
+      setMessages((prev) => {
+        if (prev.length === 0) return prev;
+        const next = prev.slice();
+        next[next.length - 1] = { ...next[next.length - 1], ...patch };
+        return next;
+      });
+    }
+  }
+
+  function stop() { if (abortRef.current) abortRef.current.abort(); }
+
+  if (serviceDown) {
+    return <div className="empty"><AlertCircle size={36} /><p>知识库服务未连接</p>
+      <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{health.error}</p></div>;
+  }
+
+  return (
+    <div className="kb-chat-layout">
+      <div className="kb-sessions">
+        <div className="kb-toolbar">
+          <span className="kb-toolbar-title">会话</span>
+          <button className="kb-btn" onClick={newSession} disabled={streaming}><Plus size={14} /> 新建</button>
+        </div>
+        {sessionsLoading && <div style={{ padding: 10, color: 'var(--ink-soft)', fontSize: 13 }}><Loader2 size={14} className="spin" /> 加载中…</div>}
+        <div className="kb-session-list">
+          {sessions.map((s) => (
+            <div key={s.thread_id} className={'kb-session-item' + (s.thread_id === currentId ? ' active' : '')}
+              onClick={() => openSession(s.thread_id)} title={s.thread_id}>
+              <div className="kb-session-title">{s.first_question || s.thread_id}</div>
+              <div className="kb-session-meta">{s.turns || 0} 轮 · {formatTime(s.updated_at)}</div>
+            </div>
+          ))}
+          {!sessionsLoading && sessions.length === 0 && (
+            <div style={{ padding: '10px 8px', fontSize: 12.5, color: 'var(--ink-soft)' }}>暂无会话，点「新建」开始</div>
+          )}
+          {sessionsHasMore && (
+            <button className="kb-btn" style={{ margin: '6px 8px' }}
+              onClick={() => loadSessions({ loadMore: true })}
+              disabled={sessionsLoadingMore || streaming}>
+              {sessionsLoadingMore ? <><Loader2 size={14} className="spin" /> 加载中…</> : `加载更多（已加载 ${sessions.length} / 共 ${sessionsTotal}）`}
+            </button>
+          )}
+          {!sessionsHasMore && sessions.length > 0 && (
+            <div style={{ padding: '6px 8px', fontSize: 12, color: 'var(--ink-soft)' }}>已加载全部 {sessionsTotal} 个会话</div>
+          )}
+        </div>
+      </div>
+
+      <div className="kb-chat-main">
+        <div className="kb-messages" ref={scrollRef}>
+          {messages.length === 0 && (
+            <div className="empty" style={{ padding: '40px 20px' }}><MessageSquare size={34} />
+              <p>选择或新建一个会话，向知识库提问</p>
+              <p style={{ fontSize: 13 }}>答案可溯源到教材页码，支持公式与教材原图</p></div>
+          )}
+          {(() => {
+            // 按「用户提问 + 知识库回答」分轮，轮与轮之间用分隔线明显隔开
+            const turns = [];
+            messages.forEach((m) => {
+              if (m.role === 'user') turns.push({ user: m, assistant: null });
+              else if (turns.length && !turns[turns.length - 1].assistant) turns[turns.length - 1].assistant = m;
+              else turns.push({ user: null, assistant: m });
+            });
+            return turns.map((t, ti) => (
+              <div key={ti} className="kb-turn">
+                {turns.length > 1 && <div className="kb-turn-label">第 {ti + 1} 轮</div>}
+                {t.user && <KbMsgNode m={t.user} />}
+                {t.assistant && <KbMsgNode m={t.assistant} />}
+              </div>
+            ));
+          })()}
+        </div>
+        {error && <div className="save-msg error" style={{ margin: '0 12px 8px' }}>{error}</div>}
+        <div className="kb-composer">
+          <textarea className="kb-input" value={input} rows={3}
+            placeholder="输入问题，Enter 发送 / Shift+Enter 换行"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} />
+          {streaming
+            ? <button className="kb-btn stop" onClick={stop}><Square size={14} /> 停止</button>
+            : <button className="kb-btn primary" onClick={send} disabled={!input.trim()}><Send size={14} /> 发送</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- 本机文件选择弹窗：左侧盘符/主目录，右侧目录 + PDF 列表 ----
+// 单击目录进入、单击 PDF 选中、双击 PDF 直接确认；也可在顶部地址栏直接输入路径跳转。
+function PathPickerModal({ initialPath, onPick, onClose }) {
+  const [cwd, setCwd] = useState('');
+  const [parent, setParent] = useState('');
+  const [dirs, setDirs] = useState([]);
+  const [files, setFiles] = useState([]);
+  const [roots, setRoots] = useState([]);
+  const [selected, setSelected] = useState('');
+  const [pathInput, setPathInput] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  async function open(target) {
+    setLoading(true); setError(''); setSelected('');
+    try {
+      const d = await FsAPI.list(target);
+      setCwd(d.path || '');
+      setParent(d.parent || '');
+      setDirs(d.dirs || []);
+      setFiles(d.files || []);
+      setPathInput(d.path || '');
+    } catch (e) {
+      setError(e.message || '读取目录失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    FsAPI.roots().then((d) => setRoots(d.roots || [])).catch(() => { });
+    open(initialPath || '');
+    // 仅在打开弹窗时定位一次初始目录
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal kb-picker" onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose} title="关闭 (Esc)"><X size={16} /></button>
+        <h2>选择教材 PDF</h2>
+
+        <div className="kb-picker-bar">
+          <button className="kb-btn" onClick={() => open(parent)} disabled={!parent || loading}
+            title={parent ? `返回 ${parent}` : '已是根目录'}>
+            <ChevronLeft size={14} /> 上级
+          </button>
+          <input type="text" value={pathInput} spellCheck={false}
+            onChange={(e) => setPathInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') open(pathInput.trim()); }}
+            placeholder="可直接粘贴路径后回车跳转" />
+          <button className="kb-btn" onClick={() => open(pathInput.trim())} disabled={loading} title="跳转 / 刷新">
+            <RefreshCw size={14} />
+          </button>
+        </div>
+
+        <div className="kb-picker-body">
+          <div className="kb-picker-side">
+            <div className="kb-picker-side-title">位置</div>
+            {roots.map((r) => (
+              <button key={r.path}
+                className={'kb-picker-drive' + (cwd === r.path ? ' active' : '')}
+                onClick={() => open(r.path)} title={r.path}>
+                <FolderOpen size={14} /> {r.name}
+              </button>
+            ))}
+          </div>
+
+          <div className="kb-picker-list">
+            {loading && <div className="kb-picker-hint"><Loader2 size={14} className="spin" /> 读取中…</div>}
+            {!loading && error && <div className="kb-picker-hint error"><AlertCircle size={14} /> {error}</div>}
+            {!loading && !error && dirs.length === 0 && files.length === 0 && (
+              <div className="kb-picker-hint">此目录下没有子目录或 PDF 文件</div>
+            )}
+            {!loading && !error && dirs.map((d) => (
+              <button key={d.path} className="kb-picker-row dir" onClick={() => open(d.path)} title={d.path}>
+                <FolderOpen size={15} className="kb-picker-icon" />
+                <span className="kb-picker-name">{d.name}</span>
+                <ChevronRight size={14} className="kb-picker-arrow" />
+              </button>
+            ))}
+            {!loading && !error && files.map((f) => (
+              <button key={f.path}
+                className={'kb-picker-row file' + (selected === f.path ? ' selected' : '')}
+                onClick={() => setSelected(f.path)}
+                onDoubleClick={() => onPick(f.path)}
+                title={f.path}>
+                <FileText size={15} className="kb-picker-icon" />
+                <span className="kb-picker-name">{f.name}</span>
+                <span className="kb-picker-size">{formatFileSize(f.size)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="kb-picker-foot">
+          <span className="kb-picker-selected" title={selected}>{selected || '单击选中 PDF，双击可直接确认'}</span>
+          <button className="kb-btn" onClick={onClose}>取消</button>
+          <button className="kb-btn primary" onClick={() => selected && onPick(selected)} disabled={!selected}>
+            <Check size={14} /> 选择
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- 子视图③：导入（build 异步任务 + SSE 进度） ----
+function KbBuild({ health, healthLoading }) {
+  const serviceDown = health && health.error;
+  const [pdf, setPdf] = useState('');
+  const [book, setBook] = useState('');
+  const [startPage, setStartPage] = useState('1');
+  const [endPage, setEndPage] = useState('12');
+  const [subject, setSubject] = useState('');   // 无默认学科：必须手动选择，防止导入学科出错
+  const [maxNewCalls, setMaxNewCalls] = useState('');
+  const [maxChunks, setMaxChunks] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+
+  const [estimating, setEstimating] = useState(false);
+  const [estimate, setEstimate] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const [taskId, setTaskId] = useState('');
+  const [taskStatus, setTaskStatus] = useState('');   // queued/running/done/failed
+  const [prog, setProg] = useState({ visionDone: 0, visionTotal: 0, extractDone: 0, extractTotal: 0, stage: '', logs: [] });
+  const abortRef = useRef(null);
+  const bookTouched = useRef(false);   // 用户是否手动编辑过显示名（手动编辑后不再自动覆盖）
+  const [tasks, setTasks] = useState([]);
+
+  const buildPayload = (confirm) => {
+    const p = {
+      pdf: pdf.trim(),
+      startPage: parseInt(startPage, 10) || 1,
+      endPage: parseInt(endPage, 10) || 1,
+      subject,
+    };
+    if (book.trim()) p.book = book.trim();
+    if (maxNewCalls.trim()) p.maxNewCalls = parseInt(maxNewCalls, 10);
+    if (maxChunks.trim()) p.maxChunks = parseInt(maxChunks, 10);
+    if (confirm !== undefined) p.confirm = confirm;
+    return p;
+  };
+
+  // 从 PDF 全路径提取教材显示名：取最后一段文件名并去掉扩展名
+  function nameFromPath(p) {
+    return p.split(/[\\/]/).filter(Boolean).pop().replace(/\.[^.]+$/, '');
+  }
+
+  // 文件选择器回调：回填路径；显示名始终从全路径自动提取（覆盖旧值）
+  function pickPdf(filePath) {
+    setPdf(filePath);
+    setShowPicker(false);
+    bookTouched.current = false;
+    const name = nameFromPath(filePath);
+    if (name) setBook(name);
+  }
+
+  // 手输/粘贴路径：未手动改过显示名时，同样自动从路径提取
+  function onPdfChange(e) {
+    const v = e.target.value;
+    setPdf(v);
+    if (!bookTouched.current && /\.pdf$/i.test(v.trim())) {
+      const name = nameFromPath(v.trim());
+      if (name) setBook(name);
+    }
+  }
+
+  async function doEstimate() {
+    if (!pdf.trim()) { setError('请先填写教材 PDF 路径'); return; }
+    if (!subject) { setError('请先选择学科'); return; }
+    setEstimating(true); setError(''); setEstimate(null);
+    try { setEstimate(await AgentAPI.buildEstimate(buildPayload())); }
+    catch (e) { setError(e.message || '预估失败'); }
+    finally { setEstimating(false); }
+  }
+
+  async function loadTasks() {
+    try { const d = await AgentAPI.buildTasks(); setTasks((d.tasks || []).slice().reverse()); }
+    catch (e) { /* ignore */ }
+  }
+  useEffect(() => { if (!serviceDown) loadTasks(); }, [serviceDown]);
+
+  async function doSubmit() {
+    if (!pdf.trim()) { setError('请先填写教材 PDF 路径'); return; }
+    if (!subject) { setError('请先选择学科后再确认导入'); return; }
+    setSubmitting(true); setError(''); setNotice('');
+    const res = await agentBuildSubmitRaw(buildPayload(true));
+    setSubmitting(false);
+    if (res.ok) {
+      const t = res.body;
+      setNotice(`建库任务已提交：${t.task_id}（${t.status}）`);
+      subscribe(t.task_id);
+      loadTasks();
+    } else if (res.status === 409) {
+      const detail = (res.body && res.body.detail) || {};
+      if (detail.active_task_id) {
+        setNotice('已有建库任务在执行，已切换到该任务的进度：' + detail.active_task_id);
+        subscribe(detail.active_task_id);
+      } else {
+        setError(detail.message || '提交被拒绝（409）：' + JSON.stringify(detail));
+      }
+    } else {
+      const detail = (res.body && res.body.detail);
+      setError(typeof detail === 'string' ? detail : (detail && detail.message) || `提交失败 HTTP ${res.status}`);
+    }
+  }
+
+  function logLine(evt) {
+    const bits = [];
+    if (evt.stage === 'vision') {
+      if (evt.event === 'start') bits.push(`视觉提取开始：${evt.pdf_name || ''} 第 ${evt.start_page}-${evt.end_page} 页（共 ${evt.total_pages} 页）`);
+      else if (evt.event === 'page_done') { bits.push(`视觉提取 ${evt.done}/${evt.total_pages} 页${evt.cached ? '（缓存）' : ''}`); setProg((p) => ({ ...p, visionDone: evt.done, visionTotal: evt.total_pages, stage: 'vision' })); }
+      else if (evt.event === 'capped') bits.push(`视觉提取达上限停止（max_new_calls=${evt.max_new_calls}）`);
+      else if (evt.event === 'vision_done') bits.push(`视觉提取完成：${evt.processed_pages} 页，新调用 ${evt.new_vision_calls} 次`);
+    } else if (evt.stage === 'extract') {
+      if (evt.event === 'plan') { bits.push(`切分为 ${evt.total_chunks} 个子块`); setProg((p) => ({ ...p, extractTotal: evt.total_chunks })); }
+      else if (evt.event === 'chunk_start') bits.push(`子块 ${evt.chunk}/${evt.total_chunks} 开始${evt.cached ? '（缓存命中）' : ''}：${evt.label || ''}`);
+      else if (evt.event === 'chunk_done') { bits.push(`子块 ${evt.chunk}/${evt.total_chunks} 完成：写入 ${evt.docs} 切片，图节点 ${evt.nodes}`); setProg((p) => ({ ...p, extractDone: evt.chunk, extractTotal: evt.total_chunks, stage: 'extract' })); }
+      else if (evt.event === 'build_done') bits.push(`抽取入库完成：新抽取 ${evt.new_chunks} 子块，向量 ${evt.docs} 条，图节点 ${evt.nodes}`);
+    } else if (evt.stage === 'task') {
+      if (evt.event === 'summary') bits.push('任务汇总完成');
+    }
+    return bits;
+  }
+
+  async function subscribe(id) {
+    setTaskId(id); setTaskStatus('running');
+    setProg({ visionDone: 0, visionTotal: 0, extractDone: 0, extractTotal: 0, stage: '', logs: [] });
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      const resp = await fetch(AgentAPI.buildEventsUrl(id, 0), { signal: ctrl.signal });
+      if (!resp.ok) { const t = await resp.text().catch(() => ''); setError(`进度订阅失败 HTTP ${resp.status} ${t.slice(0, 200)}`); return; }
+      await readSSEStream(resp, (evt) => {
+        if (evt.type === 'progress') {
+          const lines = logLine(evt);
+          if (lines.length) setProg((p) => ({ ...p, logs: [...p.logs, ...lines].slice(-200) }));
+        } else if (evt.type === 'task_status') {
+          setTaskStatus(evt.status);
+          if (evt.error) setError('建库失败：' + evt.error);
+          if (evt.result) {
+            const r = evt.result;
+            setProg((p) => ({ ...p, logs: [...p.logs, `✅ 完成：${r.pages} 页 / 图节点 ${r.nodes} / 视觉调用 ${r.vision_calls} / 推理调用 ${r.reasoning_calls}`].slice(-200) }));
+          }
+          loadTasks();
+        } else if (evt.type === 'error') { setError(evt.detail || '进度流错误'); }
+      }, ctrl.signal);
+    } catch (e) {
+      if (e.name !== 'AbortError') setError(e.message || '进度订阅中断');
+    }
+  }
+
+  function unsubscribe() { if (abortRef.current) abortRef.current.abort(); }
+
+  const visionPct = prog.visionTotal ? Math.round(prog.visionDone / prog.visionTotal * 100) : 0;
+  const extractPct = prog.extractTotal ? Math.round(prog.extractDone / prog.extractTotal * 100) : 0;
+  const running = taskStatus === 'running' || taskStatus === 'queued';
+
+  if (serviceDown) {
+    return <div className="empty"><AlertCircle size={36} /><p>知识库服务未连接</p>
+      <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{health.error}</p></div>;
+  }
+
+  return (
+    <div className="kb-build-layout">
+      <div className="kb-build-form">
+        <div className="kb-form-section">
+          <div className="kb-form-section-title">教材文件</div>
+          <div className="kb-path-row">
+            <input type="text" value={pdf} spellCheck={false}
+              onChange={onPdfChange}
+              placeholder="选择或粘贴 PDF 绝对路径，例如 D:\教材\物理9S.pdf" />
+            <button className="kb-btn" onClick={() => setShowPicker(true)} title="浏览本机文件">
+              <FolderOpen size={14} /> 选择文件
+            </button>
+          </div>
+          <div className="kb-field-hint">点「选择文件」逐级点选 PDF 即可，也可直接粘贴绝对路径。</div>
+        </div>
+
+        <div className="kb-form-section">
+          <div className="kb-form-section-title">教材信息</div>
+          <div className="kb-form-grid">
+            <div className="field kb-grid-name">
+              <label className="field-label">教材显示名（可选）</label>
+              <input type="text" value={book} placeholder="自动从教材路径提取，可手动修改"
+                onChange={(e) => {
+                  setBook(e.target.value);
+                  bookTouched.current = !!e.target.value.trim();
+                }} />
+            </div>
+            <div className="field">
+              <label className="field-label">起始页</label>
+              <input type="number" min={1} value={startPage} onChange={(e) => setStartPage(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field-label">结束页</label>
+              <input type="number" min={1} value={endPage} onChange={(e) => setEndPage(e.target.value)} />
+            </div>
+            <div className="field">
+              <label className="field-label">学科 <span style={{ color: '#e5484d' }}>*</span></label>
+              <select className="kb-select" value={subject} onChange={(e) => setSubject(e.target.value)}>
+                <option value="" disabled>请选择学科</option>
+                {KB_SUBJECTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="kb-form-section kb-form-advanced">
+          <button className="kb-link-btn" onClick={() => setShowAdvanced((v) => !v)}>{showAdvanced ? '▾' : '▸'} 高级选项（控成本）</button>
+          {showAdvanced && (
+            <div className="kb-form-grid two">
+              <div className="field">
+                <label className="field-label">本批视觉新调用上限</label>
+                <input type="number" min={0} value={maxNewCalls} onChange={(e) => setMaxNewCalls(e.target.value)} placeholder="留空=不限" />
+              </div>
+              <div className="field">
+                <label className="field-label">本次处理新子块上限</label>
+                <input type="number" min={0} value={maxChunks} onChange={(e) => setMaxChunks(e.target.value)} placeholder="留空=不限" />
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="kb-btn" onClick={doEstimate} disabled={estimating || submitting || !subject}>
+            {estimating ? <Loader2 size={14} className="spin" /> : <Activity size={14} />} 规模预估
+          </button>
+          <button className="kb-btn primary" onClick={doSubmit} disabled={submitting || estimating || !subject}
+            title={subject ? '' : '请先选择学科'}>
+            {submitting ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} 确认导入
+          </button>
+          {!subject && <span className="kb-field-hint">⚠ 请先选择学科，选择后才能确认导入</span>}
+        </div>
+        {estimate && (
+          <div className="kb-estimate">
+            <div className="kb-estimate-title">规模预估（0 模型调用）</div>
+            <div className="kb-estimate-grid">
+              <span>页区间 <b>{estimate.range_pages}</b></span>
+              <span>已缓存页 <b>{estimate.cached_pages}</b></span>
+              <span>新增视觉调用 <b>{estimate.new_vision_calls}</b></span>
+              <span>新子块 <b>{estimate.new_chunks}</b>（缓存 {estimate.cached_chunks}）</span>
+              <span className="kb-estimate-total">预估新增模型调用 <b>{estimate.new_calls_total}</b> 次</span>
+            </div>
+            {estimate.new_calls_total > 0 && <div className="kb-hint">⚠️「确认导入」将产生约 {estimate.new_calls_total} 次模型调用（会消耗 API 额度）。</div>}
+          </div>
+        )}
+        {notice && <div className="kb-notice">{notice}</div>}
+        {error && <div className="save-msg error" style={{ marginTop: 8 }}>{error}</div>}
+      </div>
+
+      <div className="kb-build-progress">
+        <div className="kb-toolbar">
+          <span className="kb-toolbar-title">导入进度{taskId ? ` · ${taskId}` : ''}</span>
+          {running && <button className="kb-btn" onClick={unsubscribe}><Square size={14} /> 断开订阅</button>}
+        </div>
+        {!taskId && <div style={{ fontSize: 13, color: 'var(--ink-soft)', padding: '8px 0' }}>提交导入后在这里显示逐页 / 逐子块进度。</div>}
+        {taskId && (
+          <div>
+            <div className="kb-status-line">状态：<span className={'kb-status-badge ' + taskStatus}>{taskStatus}</span></div>
+            <KbProgressBar label="视觉提取" done={prog.visionDone} total={prog.visionTotal} pct={visionPct} active={prog.stage === 'vision' && running} />
+            <KbProgressBar label="抽取入库" done={prog.extractDone} total={prog.extractTotal} pct={extractPct} active={prog.stage === 'extract' && running} />
+            {prog.logs.length > 0 && (
+              <div className="kb-log">
+                {prog.logs.map((l, i) => <div key={i} className="kb-log-line">{l}</div>)}
+              </div>
+            )}
+          </div>
+        )}
+        {tasks.length > 0 && (
+          <div className="kb-tasks-history">
+            <div className="kb-toolbar-title" style={{ margin: '14px 0 6px' }}>任务历史</div>
+            {tasks.map((t) => (
+              <div key={t.task_id} className="kb-task-row" onClick={() => subscribe(t.task_id)} title="点击查看进度">
+                <span className={'kb-status-badge ' + t.status}>{t.status}</span>
+                <span className="kb-task-id">{t.task_id}</span>
+                <span className="kb-task-name">{(t.params && (t.params.book || (t.params.pdf || '').split(/[\\/]/).pop())) || ''}</span>
+                <span className="kb-task-time">{formatTime(t.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showPicker && (
+        <PathPickerModal initialPath={pdf.trim()} onPick={pickPdf} onClose={() => setShowPicker(false)} />
+      )}
+    </div>
+  );
+}
+
+function KbProgressBar({ label, done, total, pct, active }) {
+  return (
+    <div className="kb-progress">
+      <div className="kb-progress-head">
+        <span>{label}</span>
+        <span>{total ? `${done}/${total}` : (active ? '准备中…' : '—')}</span>
+      </div>
+      <div className="kb-progress-track">
+        <div className={'kb-progress-fill' + (active ? ' active' : '')} style={{ width: (total ? pct : 0) + '%' }} />
+      </div>
+    </div>
+  );
+}
+
+// ---- 知识库 tab 容器 ----
+// active：所在页签是否正在显示。组件常驻挂载（切页只隐藏不卸载，保住对话状态），
+// 因此连接状态改为每次重新显示时刷新，而不是只在挂载时检查一次。
+function KnowledgeBaseTab({ active }) {
+  const [sub, setSub] = useState('chat');
+  const [health, setHealth] = useState(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+
+  async function checkHealth() {
+    setHealthLoading(true);
+    try { setHealth(await AgentAPI.health()); }
+    catch (e) { setHealth({ error: e.message || '无法连接知识库服务' }); }
+    finally { setHealthLoading(false); }
+  }
+  useEffect(() => { if (active) checkHealth(); }, [active]);
+
+  const subs = [
+    { key: 'books', label: '教材', icon: <BookOpen size={14} /> },
+    { key: 'chat', label: '对话', icon: <MessageSquare size={14} /> },
+    { key: 'build', label: '导入', icon: <Upload size={14} /> },
+  ];
+
+  return (
+    <div className="panel">
+      <div className="kb-head">
+        <div className="kb-subtabs">
+          {subs.map((s) => (
+            <button key={s.key} className={'kb-subtab' + (sub === s.key ? ' active' : '')} onClick={() => setSub(s.key)}>
+              {s.icon} {s.label}
+            </button>
+          ))}
+        </div>
+        <KbServiceBanner health={health} healthLoading={healthLoading} onRetry={checkHealth} />
+      </div>
+      {sub === 'books' && <KbBooks health={health} healthLoading={healthLoading} onRetry={checkHealth} />}
+      {/* 对话/导入子页常驻挂载、切子页仅隐藏：卸载会丢失正在进行的对话与导入进度 */}
+      <div style={{ display: sub === 'chat' ? undefined : 'none' }}>
+        <KbChat health={health} healthLoading={healthLoading} />
+      </div>
+      <div style={{ display: sub === 'build' ? undefined : 'none' }}>
+        <KbBuild health={health} healthLoading={healthLoading} />
+      </div>
+    </div>
+  );
+}
+
 // ============== MAIN APP ==============
 
 export default function App() {
@@ -2082,6 +3354,14 @@ export default function App() {
   const [dirMsg, setDirMsg] = useState('');
   const [focusTimeoutHours, setFocusTimeoutHours] = useState(48);
   const [focusTimeoutInput, setFocusTimeoutInput] = useState('48');
+
+  // --- sida-agent 知识库服务配置 ---
+  const [sidaHostInput, setSidaHostInput] = useState('127.0.0.1');
+  const [sidaPortInput, setSidaPortInput] = useState('6173');
+  const [chatPageSizeInput, setChatPageSizeInput] = useState('20'); // 知识库会话列表每批条数（1-200）
+  const [sidaSaving, setSidaSaving] = useState(false);
+  const [sidaTesting, setSidaTesting] = useState(false);
+  const [sidaMsg, setSidaMsg] = useState('');
 
   // --- Scan state ---
   const [scanData, setScanData] = useState(null);
@@ -2226,6 +3506,10 @@ export default function App() {
       if (v > 0) { setFocusTimeoutHours(v); setFocusTimeoutInput(String(v)); }
       const m = Number(c.focus_max_per_subject);
       if (m > 0) setFocusMaxPerSubject(m);
+      if (c.sida_agent_host) setSidaHostInput(c.sida_agent_host);
+      if (c.sida_agent_port) setSidaPortInput(String(c.sida_agent_port));
+      const ps = Number(c.chat_session_page_size);
+      if (ps >= 1 && ps <= 200) setChatPageSizeInput(String(ps));
     }).catch(() => { });
   }
 
@@ -2584,6 +3868,42 @@ export default function App() {
       setDirMsg(e.message || '保存失败');
     } finally {
       setDirSaving(false);
+    }
+  }
+
+  // 保存 sida-agent 服务地址与会话列表每批条数（全局配置，对所有学生生效），保存后立即测连
+  async function saveSidaConfig() {
+    setSidaSaving(true); setSidaMsg('');
+    try {
+      const ps = parseInt(chatPageSizeInput, 10);
+      if (!isNaN(ps) && (ps < 1 || ps > 200)) {
+        setSidaMsg('会话列表每批条数必须在 1-200 之间');
+        setSidaSaving(false);
+        return;
+      }
+      await API.saveConfig({
+        sida_agent_host: sidaHostInput.trim() || '127.0.0.1',
+        sida_agent_port: sidaPortInput.trim(),
+        chat_session_page_size: isNaN(ps) ? 20 : ps,
+      });
+      setSidaSaving(false);
+      await testSidaConnection();
+    } catch (e) {
+      setSidaMsg('保存失败：' + (e.message || e));
+      setSidaSaving(false);
+    }
+  }
+
+  // 测试与 sida-agent 的连通性（经本后端代理）
+  async function testSidaConnection() {
+    setSidaTesting(true); setSidaMsg('');
+    try {
+      const h = await AgentAPI.health();
+      setSidaMsg(`✅ 连接成功 · 图谱 ${h.graph_nodes} 节点 / 向量 ${h.vector_count} 条`);
+    } catch (e) {
+      setSidaMsg('无法连接：' + (e.message || e));
+    } finally {
+      setSidaTesting(false);
     }
   }
 
@@ -3522,6 +4842,10 @@ export default function App() {
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <History size={14} style={{ marginRight: 4, verticalAlign: -2 }} />时间线
             </button>
+            <button className={'tab-btn' + (tab === 'knowledge' ? ' active' : '')} onClick={() => setTab('knowledge')}
+              title="sida-agent 知识库：教材 / 对话 / 导入">
+              <Sparkles size={14} style={{ marginRight: 4, verticalAlign: -2 }} />知识库
+            </button>
             <button className={'tab-btn' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <Settings size={14} style={{ marginRight: 4, verticalAlign: -2 }} />配置&统计
@@ -3639,6 +4963,44 @@ export default function App() {
                   💡 提示：设置每学科重点练上限后，需切换一次「重点练」标签页即可生效。
                 </div>
               )}
+            </div>
+
+            {/* ============ 知识库服务（sida-agent）配置 ============ */}
+            <div className="config-box" style={{ marginTop: 20 }}>
+              <h2 className="config-title">知识库服务（sida-agent）</h2>
+              <p className="config-hint" style={{ marginTop: 0 }}>
+                错题本「知识库」页通过本服务对接 sida-agent 的 HTTP API（README 3.4）。请确保 sida-agent 已启动：
+                <code style={{ marginLeft: 4 }}>uv run python main.py --stage serve --host 127.0.0.1 --port 6173</code>
+              </p>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                <div className="field" style={{ flex: 2, minWidth: 220, marginBottom: 0 }}>
+                  <label className="field-label">服务地址（Host）</label>
+                  <input type="text" value={sidaHostInput}
+                    onChange={(e) => setSidaHostInput(e.target.value)}
+                    placeholder="例如：127.0.0.1 或 http://192.168.1.10" />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 120, marginBottom: 0 }}>
+                  <label className="field-label">端口（Port）</label>
+                  <input type="number" value={sidaPortInput}
+                    onChange={(e) => setSidaPortInput(e.target.value)}
+                    placeholder="默认 6173" />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 150, marginBottom: 0 }}>
+                  <label className="field-label">会话列表每批条数</label>
+                  <input type="number" min="1" max="200" value={chatPageSizeInput}
+                    onChange={(e) => setChatPageSizeInput(e.target.value)}
+                    placeholder="默认 20，最大 200" />
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
+                <button className="save-btn" style={{ marginTop: 0 }} onClick={saveSidaConfig} disabled={sidaSaving}>
+                  {sidaSaving ? '保存中…' : '保存配置'}
+                </button>
+                <button className="kb-btn" onClick={testSidaConnection} disabled={sidaTesting} style={{ height: 34 }}>
+                  {sidaTesting ? <Loader2 size={14} className="spin" /> : <Link2 size={14} />} 测试连接
+                </button>
+                {sidaMsg && <div className={'save-msg' + (sidaMsg.includes('失败') || sidaMsg.includes('无法') ? ' error' : '')} style={{ marginTop: 0 }}>{sidaMsg}</div>}
+              </div>
             </div>
 
             {/* ============ AI TOKEN 统计 ============ */}
@@ -4042,7 +5404,8 @@ export default function App() {
                               {group.items.map((p) => (
                                 <ProblemCard key={p.file_path} problem={p}
                                   imageUrl={API.imageUrl(p.file_path)}
-                                  onClick={() => openDetail(p)} />
+                                  onClick={() => openDetail(p)}
+                                  onImageDoubleClick={() => openDetail(p)} />
                               ))}
                             </div>
                           </div>
@@ -4128,57 +5491,64 @@ export default function App() {
             </div>
           );
         })()}
-      </div>
 
-      {/* ============ TIMELINE TAB ============ */}
-      {tab === 'timeline' && (
-        <div className="panel">
-          {!timelineLoaded ? (
-            <div className="empty"><Loader2 size={28} className="spin" /><p>加载中…</p></div>
-          ) : timelineDays.length === 0 ? (
-            <div className="empty"><History size={40} /><p>时间线为空</p>
-              <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
-                编辑错题的解答后，编辑记录会按时间出现在这里
-              </p>
-            </div>
-          ) : (
-            <div className="timeline-page">
-              {timelineDays.map((day) => (
-                <div key={day.date} className="timeline-day">
-                  <div className="timeline-day-header">
-                    <div className="timeline-day-dot" />
-                    <span className="timeline-day-date">{day.date}</span>
-                    <span className="timeline-day-weekday">{day.weekday}</span>
-                    <span className="timeline-day-count">{day.count}<span className="count-unit">题</span></span>
-                  </div>
-                  <div className="timeline-day-items">
-                    {day.items.map((p) => (
-                      <ProblemCard key={p.file_path} problem={p}
-                        imageUrl={API.imageUrl(p.file_path)}
-                        onClick={() => openDetail(p, 'timeline')}
-                        extraFooter={
-                          <div className="timeline-card-footer">
-                            <span>✏️ 编辑 {p.edit_count} 次</span>
-                            {p.last_time_display && <span>· {p.last_time_display}</span>}
-                          </div>
-                        } />
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {/* Sentinel for infinite scroll */}
-              <div ref={timelineSentinelRef} className="timeline-sentinel">
-                {timelineLoading && (
-                  <div className="timeline-loading"><Loader2 size={18} className="spin" /> 加载更多…</div>
-                )}
-                {!timelineHasMore && timelineDays.length > 0 && (
-                  <div className="timeline-end">已加载全部时间线</div>
-                )}
+        {/* ============ TIMELINE TAB ============ */}
+        {tab === 'timeline' && (
+          <div className="panel">
+            {!timelineLoaded ? (
+              <div className="empty"><Loader2 size={28} className="spin" /><p>加载中…</p></div>
+            ) : timelineDays.length === 0 ? (
+              <div className="empty"><History size={40} /><p>时间线为空</p>
+                <p style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+                  编辑错题的解答后，编辑记录会按时间出现在这里
+                </p>
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="timeline-page">
+                {timelineDays.map((day) => (
+                  <div key={day.date} className="timeline-day">
+                    <div className="timeline-day-header">
+                      <div className="timeline-day-dot" />
+                      <span className="timeline-day-date">{day.date}</span>
+                      <span className="timeline-day-weekday">{day.weekday}</span>
+                      <span className="timeline-day-count">{day.count}<span className="count-unit">题</span></span>
+                    </div>
+                    <div className="timeline-day-items">
+                      {day.items.map((p) => (
+                        <ProblemCard key={p.file_path} problem={p}
+                          imageUrl={API.imageUrl(p.file_path)}
+                          onClick={() => openDetail(p, 'timeline')}
+                          extraFooter={
+                            <div className="timeline-card-footer">
+                              <span>✏️ 编辑 {p.edit_count} 次</span>
+                              {p.last_time_display && <span>· {p.last_time_display}</span>}
+                            </div>
+                          } />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {/* Sentinel for infinite scroll */}
+                <div ref={timelineSentinelRef} className="timeline-sentinel">
+                  {timelineLoading && (
+                    <div className="timeline-loading"><Loader2 size={18} className="spin" /> 加载更多…</div>
+                  )}
+                  {!timelineHasMore && timelineDays.length > 0 && (
+                    <div className="timeline-end">已加载全部时间线</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============ KNOWLEDGE BASE TAB ============ */}
+        {/* 常驻挂载、切页仅隐藏：条件渲染会在切走时卸载组件，丢失对话消息 /
+            当前会话 / 正在流式生成的回答；隐藏保留则回来即恢复原对话 */}
+        <div style={{ display: tab === 'knowledge' ? undefined : 'none' }}>
+          <KnowledgeBaseTab active={tab === 'knowledge'} />
         </div>
-      )}
+      </div>
 
       {/* ============ DETAIL MODAL ============ */}
       {detail && (
@@ -4194,17 +5564,40 @@ export default function App() {
 
             <div className="modal detail-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-close" onClick={closeDetailModal}><X size={16} /></div>
-              <img src={API.imageUrl(detail.file_path)} alt={detail.title}
-                onDoubleClick={() => setPreviewSolutionImage(detail.file_path)}
-                style={{ cursor: 'zoom-in' }}
-                title="双击查看大图（滚轮缩放）" />
+              <div className="detail-layout">
+                <div className="detail-visual">
+                  <img src={API.imageUrl(detail.file_path)} alt={detail.title}
+                    onDoubleClick={() => setPreviewSolutionImage(detail.file_path)}
+                    style={{ cursor: 'zoom-in' }}
+                    title="双击查看大图（滚轮缩放）" />
 
-              {/* 位置信息 */}
-              {detailPositionText && (
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-                  <span className="detail-position">{detailPositionText}</span>
+                  {/* 位置信息 */}
+                  {detailPositionText && (
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                      <span className="detail-position">{detailPositionText}</span>
+                    </div>
+                  )}
+                  <div className="detail-tags">
+                    <label className="field-label">知识点标签</label>
+                    <div className="tag-list-vertical">
+                      {(detail.tags || []).map((t) => (
+                        <div key={t} className="tag-row">
+                          <TagPill tag={t} onDelete={removeDetailTag} onEdit={editDetailTag} />
+                        </div>
+                      ))}
+                      {(detail.tags || []).length === 0 && (
+                        <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>还没有标签</span>
+                      )}
+                    </div>
+                    <div className="tag-add-row" style={{ marginBottom: 18 }}>
+                      <input type="text" placeholder="添加知识点，回车确认" value={detailTagInput}
+                        onChange={(e) => setDetailTagInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDetailTag(); } }} />
+                      <button onClick={addDetailTag}><Plus size={14} /></button>
+                    </div>
+                  </div>
                 </div>
-              )}
+                <div className="detail-content">
 
               {/* 可编辑标题 */}
               {editingTitle ? (
@@ -4253,25 +5646,6 @@ export default function App() {
                 {detail.last_practiced_at && (
                   <span className="timestamp">🕐 最近练习 {formatTime(detail.last_practiced_at)}</span>
                 )}
-              </div>
-
-              {/* 标签列表 - 一行一个 */}
-              <label className="field-label">知识点标签</label>
-              <div className="tag-list-vertical">
-                {(detail.tags || []).map((t) => (
-                  <div key={t} className="tag-row">
-                    <TagPill tag={t} onDelete={removeDetailTag} onEdit={editDetailTag} />
-                  </div>
-                ))}
-                {(detail.tags || []).length === 0 && (
-                  <span style={{ fontSize: 12.5, color: 'var(--ink-soft)' }}>还没有标签</span>
-                )}
-              </div>
-              <div className="tag-add-row" style={{ marginBottom: 18 }}>
-                <input type="text" placeholder="添加知识点，回车确认" value={detailTagInput}
-                  onChange={(e) => setDetailTagInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDetailTag(); } }} />
-                <button onClick={addDetailTag}><Plus size={14} /></button>
               </div>
 
               <div className="field solution-section">
@@ -4393,6 +5767,8 @@ export default function App() {
                 </button>
               </div>
               {focusError && <div className="save-msg error" style={{ marginTop: 8 }}>{focusError}</div>}
+                </div>
+              </div>
             </div>
           </div>
         </div>

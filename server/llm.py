@@ -1,4 +1,4 @@
-'''
+"""
 Author: calm.wu wubo0067@hotmail.com
 Date: 2026-07-03 09:00:38
 LastEditors: calm.wu wubo0067@hotmail.com
@@ -7,7 +7,7 @@ FilePath: server/llm.py
 Description: LLM 交互模块，负责 Prompt 管理、AI API 调用、响应解析。
 
 Copyright (c) 2026 by calm.wu wubo0067@hotmail.com, All Rights Reserved.
-'''
+"""
 
 from __future__ import annotations
 
@@ -640,12 +640,27 @@ DEFAULT_SUBJECT_CONFIG = {
 
 
 def _estimate_tokens(text: str) -> int:
-    """粗略估算文本 token 数，用于 prompt 长度预算控制。"""
+    """粗略估算文本 token 数，用于 prompt 长度预算控制。
+
+    采用简单中英字符加权策略：
+    - 中文字符（\\u4e00-\\u9fff）：平均 1.5 字符约 1 token；
+    - 其它字符（ASCII、标点、字母等）：平均 4 字符约 1 token。
+
+    Args:
+        text: 待估算的文本内容
+
+    Returns:
+        int: 估算的 token 数量
+    """
     if not text:
         return 0
+    # 统计文本中包含的汉字字符数
     zh = len(re.findall(r"[\u4e00-\u9fff]", text))
+    # 剩余字符视为非汉字字符（英文、数字、符号等）
     other = len(text) - zh
+    # 按加权比例折算并加上基础偏移
     return int(zh / 1.5 + other / 4) + 1
+
 
 # 候选考点 token 预算：注入 prompt 的"候选核心考点"列表所允许占用的最大 token 数。
 # 采用分档策略，可按模型上下文窗口自动选择，也可用 .env 直接覆盖：
@@ -658,13 +673,24 @@ LARGE_KNOWLEDGE_POINT_TOKENS = 12288  # 长上下文云端模型，可完整包�
 
 
 def _env_int(name: str, default: int = 0) -> int:
-    """读取整型环境变量，缺失或非法时返回默认值。"""
+    """读取整型环境变量，缺失或非法时返回默认值。
+
+    Args:
+        name: 环境变量名
+        default: 缺省回退值
+
+    Returns:
+        int: 解析后的整数值
+    """
+    # 从环境获取变量字符串并去除首尾空格
     raw = os.getenv(name, "").strip()
     if not raw:
         return default
     try:
+        # 尝试转为 int 整数
         return int(raw)
     except ValueError:
+        # 若非合法整数格式，安全返回默认值
         return default
 
 
@@ -678,7 +704,15 @@ def _model_context_tier(model: str, api_url: str) -> str:
     本地端点（Ollama / localhost）优先按 small 处理：本地部署的模型
     上下文窗口通常较小且可配置，不适合注入超长知识点列表。
     其余（含未知模型）按 small 处理。
+
+    Args:
+        model: 模型名称字符串
+        api_url: API 访问端点 URL
+
+    Returns:
+        str: 'small' | 'large'
     """
+    # 统一转为小写，便于做不区分大小写的匹配
     m = (model or "").lower()
     url = (api_url or "").lower()
 
@@ -686,26 +720,46 @@ def _model_context_tier(model: str, api_url: str) -> str:
     if not url or is_ollama_chat_endpoint(url) or is_probably_ollama_base_url(url):
         return "small"
 
+    # DeepSeek 官方或其推理模型具备长上下文支持
     if "deepseek.com" in url or "deepseek" in m:
         return "large"
 
+    # Qwen 3 系列及带有长上下文标签的模型
     if "qwen" in m:
+        # 匹配 qwen 后续的版本号
         ver = re.search(r"qwen[^\d]*(\d+(?:\.\d+)?)", m)
         if ver and float(ver.group(1)) >= 3:
             return "large"
+        # 检查是否包含 long / plus / max 关键字
         if any(tag in m for tag in ("long", "plus", "max")):
             return "large"
 
+    # 默认回退到保守的小上下文窗口规格
     return "small"
 
 
 def resolve_knowledge_point_token_budget(model: str = "", api_url: str = "") -> int:
-    """确定候选考点 token 预算：.env 覆盖 > 按模型档位 > 默认。"""
+    """确定候选考点 token 预算：.env 覆盖 > 按模型档位 > 默认。
+
+    Args:
+        model: 模型名称
+        api_url: 接口端点地址
+
+    Returns:
+        int: 候选考点允许占用的最大 token 预算
+    """
+    # 1. 优先读取环境变量 KNOWLEDGE_POINT_TOKENS 显式覆盖
     override = _env_int("KNOWLEDGE_POINT_TOKENS", 0)
     if override > 0:
         return override
+    # 2. 根据模型规格和网络端点推断档位
     tier = _model_context_tier(model, api_url)
-    return LARGE_KNOWLEDGE_POINT_TOKENS if tier == "large" else SMALL_KNOWLEDGE_POINT_TOKENS
+    # 3. 按档位返回大模型预算或小模型保守预算
+    return (
+        LARGE_KNOWLEDGE_POINT_TOKENS
+        if tier == "large"
+        else SMALL_KNOWLEDGE_POINT_TOKENS
+    )
 
 
 def _normalize_text(text: str) -> str:
@@ -717,6 +771,7 @@ def _normalize_text(text: str) -> str:
     Returns:
         str: 去除所有空白、统一为小写后的文本；输入为 None/空时返回空字符串
     """
+    # 正则替换所有空白字符（空格、换行、制表符等）并转小写
     return re.sub(r"\s+", "", text or "").lower()
 
 
@@ -728,28 +783,39 @@ def _format_knowledge_points_for_prompt(
     Args:
         knowledge_points: 全量候选知识点列表
         max_tokens: 候选考点部分的 token 预算；None 时使用默认（小上下文）预算
+
+    Returns:
+        str: 拼接并格式化后的候选考点说明文本
     """
     if not knowledge_points:
         return ""
 
-    budget = max_tokens if max_tokens and max_tokens > 0 else DEFAULT_KNOWLEDGE_POINT_TOKENS
+    # 计算有效 token 预算，若无有效传入则取 DEFAULT_KNOWLEDGE_POINT_TOKENS
+    budget = (
+        max_tokens if max_tokens and max_tokens > 0 else DEFAULT_KNOWLEDGE_POINT_TOKENS
+    )
     selected_points: list[str] = []
     used_tokens = 0
 
+    # 逐项估算 token，在不超过预算的前提下尽可能加入更多知识点
     for point in knowledge_points:
         candidate = f"- {point}"
         candidate_tokens = _estimate_tokens(candidate)
+        # 若已有选中项且继续加入会超预算，则终止加入
         if selected_points and used_tokens + candidate_tokens > budget:
             break
         selected_points.append(candidate)
         used_tokens += candidate_tokens
 
+    # 判断是否发生了列表截断
     truncated = len(selected_points) < len(knowledge_points)
+    # 组织 Prompt 结构引导模型优先选用列表考点
     prompt_lines = [
         "【候选核心考点】",
         "请优先从以下候选考点中选择 1-4 个最匹配的项；只有当候选列表里确实没有合适项时，才允许自行推理并输出新的合理考点。",
         *selected_points,
     ]
+    # 若存在截断，添加尾部提示告知模型仅展示了部分考点
     if truncated:
         prompt_lines.append("（候选考点过多，以上为按顺序截断后的可选列表）")
 
@@ -759,13 +825,26 @@ def _format_knowledge_points_for_prompt(
 def _map_tags_to_knowledge_points(
     tags: list[str], knowledge_points: list[str]
 ) -> list[str]:
-    """将模型自由生成的标签映射回本地全量知识点库。"""
+    """将模型自由生成的标签映射回本地全量知识点库。
+
+    使用多维打分策略（完全匹配、子串包含、公共字集合、双字符重合度），
+    将 AI 生成的非标准标签自动对齐到学科标准知识点名称，保留高置信度匹配结果。
+
+    Args:
+        tags: AI 模型返回的标签字符串列表
+        knowledge_points: 当前学科标准知识点库全量列表
+
+    Returns:
+        list[str]: 映射对齐并去重后的标准标签列表
+    """
     if not tags or not knowledge_points:
         return tags
 
+    # 预先归一化标准知识点，结构为 [(normalized_point, original_point)]
     normalized_points = [(_normalize_text(point), point) for point in knowledge_points]
     mapped: list[str] = []
 
+    # 遍历 AI 输出的每一个标签
     for tag in tags:
         if not isinstance(tag, str):
             continue
@@ -775,26 +854,32 @@ def _map_tags_to_knowledge_points(
 
         best_score = -1
         best_point = tag.strip()
+        # 提取标签中的有效字符集合（中文、字母、数字）
         tag_chars = set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", normalized_tag))
 
+        # 遍历标准库考点，计算匹配得分
         for normalized_point, point in normalized_points:
             if not normalized_point:
                 continue
+            # 1. 完全一致匹配：赋予绝对最高分 10^9，直接退出内层循环
             if normalized_tag == normalized_point:
                 best_score = 10**9
                 best_point = point
                 break
 
             score = 0
+            # 2. 前缀/子串包含加分
             if normalized_tag in normalized_point:
                 score += 1000 + len(normalized_tag)
             if normalized_point in normalized_tag:
                 score += 900 + len(normalized_point)
 
+            # 3. 共有字符加分
             point_chars = set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", normalized_point))
             shared_chars = len(tag_chars & point_chars)
             score += shared_chars * 10
 
+            # 4. 2-gram（相邻双字符）公共片段加分，有效衡量词序相似度
             shared_bigrams = 0
             for idx in range(len(normalized_tag) - 1):
                 bigram = normalized_tag[idx : idx + 2]
@@ -802,13 +887,16 @@ def _map_tags_to_knowledge_points(
                     shared_bigrams += 1
             score += shared_bigrams * 25
 
+            # 若当前得分刷新最高纪录，则记录该候选标准点
             if score > best_score:
                 best_score = score
                 best_point = point
 
+        # 映射去重入库
         if best_point not in mapped:
             mapped.append(best_point)
 
+    # 若映射为空则返回原标签作为兜底
     return mapped or tags
 
 
@@ -820,27 +908,33 @@ def build_analysis_prompt(
     model: str = "",
     api_url: str = "",
 ) -> str:
-    """根据学科、题目内容、用户补充提示和上一次 AI 思路构建分析 prompt
+    """根据学科、题目内容、用户补充提示和上一次 AI 思路构建解题分析 Prompt。
+
+    结合多步审题原则、多问拆段格式规范、学科考点注入与难度评级标准，
+    要求 AI 严格输出纯 JSON 对象，避免 markdown 标记或无关文本干扰解析。
 
     Args:
-        subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
-        content: 题目内容文本
-        user_prompt: 用户自定义的解题方向/知识范围约束（可选），
-            例如"我还没学动能定理，请用受力分析和牛顿第二定律讲解"
-        previous_summary: 上一次 AI 生成的解题思路（可选），用于重新分析时
-            在既有思路基础上修正、深化，而不是完全重写
+        subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表与角色设定
+        content: 题目内容文本（由 Step 1 提取的完整结构化题目）
+        user_prompt: 用户自定义的解题方向/知识范围约束（可选），例如限定方法或知识范围
+        previous_summary: 上一次 AI 生成的解题思路（可选），供重新分析时继承与修正
         model: 解题分析所用模型名（可选），用于自动确定候选考点 token 预算档位
         api_url: 解题分析所用端点（可选），与 model 一起用于判断上下文档位
+
+    Returns:
+        str: 组装完成的高质量解题分析 Prompt
     """
+    # 1. 获取学科专属配置与角色设定
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
     role = cfg["role"]
     knowledge_points = cfg["knowledge_points"]
+    # 2. 根据模型规格计算考点 token 预算并生成考点说明片段
     kp_budget = resolve_knowledge_point_token_budget(model, api_url)
     knowledge_points_section = _format_knowledge_points_for_prompt(
         knowledge_points, kp_budget
     )
 
-    # 上一次 AI 解题思路：供重新分析时参考与改进（可选）
+    # 3. 构造上一次 AI 解题思路参考区块（仅在用户要求重新分析且传入旧思路时生成）
     previous_summary_section = ""
     if previous_summary.strip():
         previous_summary_section = (
@@ -852,7 +946,7 @@ def build_analysis_prompt(
             "不要无视既有思路凭空重写，也不要简单照抄。\n\n"
         )
 
-    # 用户补充要求：约束 AI 的解题方向与知识范围（可选）
+    # 4. 构造用户补充要求区块（用于知识范围和解法约束）
     user_prompt_section = ""
     if user_prompt.strip():
         user_prompt_section = (
@@ -863,11 +957,13 @@ def build_analysis_prompt(
             "不得使用用户明确表示尚未掌握的知识或方法；若用户表达了理解困难点，请针对性重点讲解。\n\n"
         )
 
+    # 5. 考点输出指令（根据是否有学科规范库采取对应策略）
     if knowledge_points:
-        kp_section = "3. 结合上方【候选核心考点】输出 1-4 个最匹配的核心考点，按重要程度排序。优先直接选用候选列表中的原始表述；只有候选列表里确实没有合适项时，才自行推理出新的合理考点。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。"
+        kp_section = "4. 结合上方【候选核心考点】输出 1-4 个最匹配的核心考点，按重要程度排序。优先直接选用候选列表中的原始表述；只有候选列表里确实没有合适项时，才自行推理出新的合理考点。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。"
     else:
-        kp_section = "3. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。"
+        kp_section = "4. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。"
 
+    # 6. 整合组装完整的 Prompt 文本
     return "".join(
         [
             f"你是一位{role}。请根据下方提供的【题目内容】，先做严谨审题，再识别题目涉及的核心考点。\n",
@@ -881,17 +977,21 @@ def build_analysis_prompt(
             "【步骤】\n",
             "1. 先以【题目文本】为最高优先级审题，逐句识别题目的实验/推理顺序、每一步的初始状态、过程变化和最终比较对象。若【已知条件与约束】中的概括与【题目文本】冲突，必须以【题目文本】为准，不得沿用错误概括。\n",
             "2. 对连续过程题、多步实验题、先后变化题，必须特别检查后一步是否建立在前一步结果之上。不要把“同一对象的连续变化”误判为“多个彼此独立且初始状态相同的过程”，也不要默认系统会在步骤之间自动复原。\n",
+            "3. 检查【求解任务】中一共包含几个小问（如 (1)(2)(3)、①②③、第一问/第二问等）。若有多问，请先数清楚问题数量，为后续按问题逐段撰写 summary 做准备；若只有一问，则无需分段。\n",
             kp_section + "\n",
-            "4. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n",
+            "5. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n",
             "\n",
             "【输出格式】\n",
             "只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹。必须且只能包含以下 4 个字段，缺一不可：\n",
             '1. content：字符串。因为调用方已提供【题目内容】，此处直接写"（同上方题目内容）"即可，禁止复制全文。\n',
-            "2. summary：字符串，必填，非空。用 100-600 字讲解这道题的解题思路：讲清楚关键的解题步骤、用了什么方法或切入点、较为详细的推导过程，最终得到什么结论。要具体、针对本题，不要写空话套话。\n",
+            "2. summary：字符串，必填，非空。用 100-600 字讲解这道题的解题思路：讲清楚关键的解题步骤、用了什么方法或切入点、较为详细的推导过程，最终得到什么结论。要具体、针对本题，不要写空话套话。"
+            "若题目包含多个小问，summary 必须按问题逐一拆分成多个自然段：每问单独成段，段落之间用两个换行符 \\n\\n 分隔（这是合法的 JSON 字符串转义写法），并在每段开头用「(1)」「(2)」「(3)」等编号明确标出对应第几问；后一问若依赖前一问的结论或图形，需在该段中说明承接关系。若题目只有一问，则无需分段，直接写一段连贯的文字即可，不要生硬地拆成多段。\n",
             "3. tags：数组，1-4 个最匹配的核心考点。\n",
             "4. difficulty：整数，1-5。\n",
-            "示例：\n",
-            '{"content": "（同上方题目内容）", "summary": "先利用正方形对角线互相垂直平分且相等的性质，得到 AF 与 FG 所在的直角三角形；再通过证明三角形全等或相似，求出 AF/FG 的比值。", "tags": ["正方形的性质", "相似三角形"], "difficulty": 3}',
+            "单问示例（题目只有一问，summary 无需分段）：\n",
+            '{"content": "（同上方题目内容）", "summary": "先利用正方形对角线互相垂直平分且相等的性质，得到 AF 与 FG 所在的直角三角形；再通过证明三角形全等或相似，求出 AF/FG 的比值。", "tags": ["正方形的性质", "相似三角形"], "difficulty": 3}\n',
+            "多问示例（题目有三问，summary 字段值中用 \\n\\n 分段，每段开头标注问题编号）：\n",
+            '{"content": "（同上方题目内容）", "summary": "(1) 由∠ACB=∠DCE=90°可得∠ACD=∠BCE，又 AC/BC=DC/CE=m，故△ACD∽△BCE（SAS）。当 m=1 时为全等，可得 AD=BE，结合∠CAB+∠ABC=90°推出 BE⊥AD。\\n\\n(2) 当 m≠1 时，相似比为 AC/BC=1/m，同理可得 BE/AD=m，位置关系仍为垂直，证法与第(1)问一致，只是把全等换成相似对应边成比例。\\n\\n(3) 在 m=1、△CDE 为等腰直角三角形的条件下，作 C 关于 DE 的对称点 F，可证 CDFE 为正方形，面积 y=CD²。设 AD=x，作 DH⊥AC 于 H，由勾股定理得 CD²=(x-2√2)²+8，故面积 y 的最小值为 8；当 BF=1 时，利用正方形对角线关系解得 x=3√2/2 或 5√2/2。", "tags": ["相似三角形高阶模型：旋转相似（手拉手模型）", "正方形的性质与判定"], "difficulty": 4}',
         ]
     )
 
@@ -997,19 +1097,26 @@ class AiConfig:
 
 
 def is_anthropic_endpoint(api_url: str) -> bool:
+    """判断 API URL 是否为 Anthropic 官方或兼容的 /v1/messages 端点。"""
+    # 匹配路径以 /v1/messages 结尾（或紧跟查询参数 ?）
     return bool(re.search(r"/v1/messages(?:$|\?)", api_url))
 
 
 def is_ollama_chat_endpoint(api_url: str) -> bool:
+    """判断 API URL 是否为 Ollama 的原生 /api/chat 端点。"""
+    # 匹配路径以 /api/chat 结尾（或紧跟查询参数 ?）
     return bool(re.search(r"/api/chat(?:$|\?)", api_url))
 
 
 def is_deepseek_endpoint(api_url: str) -> bool:
-    """粗略判断是否为 DeepSeek 云端模型端点（兼容 Qwen3+ 等长上下文云端模型）"""
+    """粗略判断是否为 DeepSeek 云端模型端点（兼容 Qwen3+ 等长上下文云端模型）。"""
+    # 检查 URL 中是否包含 deepseek.com 域名
     return "deepseek.com" in api_url.lower()
 
 
 def is_probably_ollama_base_url(api_url: str) -> bool:
+    """判断 URL 是否像本地 Ollama 服务根地址（如 http://localhost:11434）。"""
+    # 匹配指向 localhost 或 127.0.0.1 且未携带子路径的根 URL
     return bool(
         re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?/?$", api_url.strip())
     )
@@ -1017,24 +1124,33 @@ def is_probably_ollama_base_url(api_url: str) -> bool:
 
 def normalize_api_url(api_url: str) -> str:
     """将用户输入的 API URL 归一化为标准端点格式，方便后续请求构建。
-    - Anthropic 端点：保持原样
-    - Ollama 端点：自动补充 /api/chat 路径
-    - 其他端点：自动补充 /v1/chat/completions 路径"""
+
+    归一化规则：
+    - Anthropic 端点 (/v1/messages)：保持原样
+    - 已包含 /v1/chat/completions 或 /api/chat：保持原样
+    - 本地 Ollama 根地址：自动补充 /api/chat 路径
+    - 其他 Base URL：自动补充 /v1/chat/completions 路径
+    """
     trimmed = api_url.strip()
     if not trimmed:
         return trimmed
+    # 若已经是完整的接口路径，则无需追加后缀
     if (
         is_anthropic_endpoint(trimmed)
         or "/v1/chat/completions" in trimmed
         or is_ollama_chat_endpoint(trimmed)
     ):
         return trimmed
+    # 本地回环根地址默认识别为 Ollama，补全 /api/chat
     if is_probably_ollama_base_url(trimmed):
         return f"{trimmed.rstrip('/')}/api/chat"
+    # 其他云端/代理根地址默认补全 OpenAI 兼容的 /v1/chat/completions
     return f"{trimmed.rstrip('/')}/v1/chat/completions"
 
 
 def should_require_api_key(api_url: str) -> bool:
+    """判断该端点在发起请求前是否强制要求配置非空 API Key。"""
+    # Anthropic 端点强制校验 x-api-key，本地 Ollama 等可免 Key
     return is_anthropic_endpoint(api_url)
 
 
@@ -1049,19 +1165,22 @@ def build_analyze_request(
     prompt: str = "",
     include_image: bool = True,
 ) -> dict:
-    """构建 AI 分析请求，返回 {headers, body}
+    """根据目标端点协议构建 AI 分析 HTTP 请求头与请求体，返回 {headers, body}。
 
-    include_image=False 时构造不含图片的纯文本请求，仅用于不支持图片输入的端点降级重试。
+    include_image=False 时构造不含图片的纯文本请求，仅用于纯文本分析或降级重试。
     注意：不要根据 API 域名（如 deepseek.com）擅自把图片降级成 base64 文本，
     那样模型拿到的是文字而不是图像，只会回复「无法识别」。
     """
+    # 若未显式传入 prompt，则使用默认构建的分析 prompt
     if not prompt:
         prompt = build_analysis_prompt()
-    # 输出 prompt
+    # 记录本次发送的完整 Prompt 以便调试排查
     logger.info(f"[LLM] 使用 Prompt: {prompt}")
 
+    # 分支 1：Anthropic (/v1/messages) 协议格式
     if is_anthropic_endpoint(api_url):
         content_blocks: list[dict[str, Any]] = []
+        # 若需要附带图片，按 Anthropic 规范构造 base64 image source 块
         if include_image and image_base64:
             content_blocks.append(
                 {
@@ -1069,6 +1188,7 @@ def build_analyze_request(
                     "source": {
                         "type": "base64",
                         "media_type": "image/jpeg",
+                        # 剥离可能存在的 data:image/...;base64, 前缀
                         "data": (
                             image_base64.split(",")[1]
                             if "," in image_base64
@@ -1077,6 +1197,7 @@ def build_analyze_request(
                     },
                 }
             )
+        # 追加文本指令块
         content_blocks.append({"type": "text", "text": prompt})
         return {
             "headers": {
@@ -1095,32 +1216,39 @@ def build_analyze_request(
                 ],
             },
         }
+
+    # 分支 2：Ollama 原生 (/api/chat) 协议格式
     if is_ollama_chat_endpoint(api_url):
         return {
             "headers": {"Content-Type": "application/json"},
             "body": {
                 "model": config.model,
-                "stream": False,
-                "think": False,
+                "stream": False,  # 关闭流式输出，一次性拿完整 JSON
+                "think": False,  # 关闭额外思考流，加速结构化输出
                 "options": {"num_predict": config.max_tokens},
                 "messages": [
                     {
                         "role": "user",
                         "content": prompt,
-                        "images": [image_base64]
-                        if (include_image and image_base64)
-                        else [],
+                        # Ollama 接收纯 base64 字符串列表作为 images 字段
+                        "images": (
+                            [image_base64] if (include_image and image_base64) else []
+                        ),
                     }
                 ],
             },
         }
-    # OpenAI 兼容格式
+
+    # 分支 3：OpenAI 兼容格式 (/v1/chat/completions)
     headers = {"Content-Type": "application/json"}
+    # 若配置了 API Key，则添加标准 Bearer 认证头
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
 
+    # 组装多模态 content 数组：先放文本块
     content_blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
 
+    # 若包含图片且存在 data_uri，则追加标准 image_url 对象块
     if include_image and image_data_uri:
         content_blocks.append(
             {"type": "image_url", "image_url": {"url": image_data_uri}}
@@ -1157,13 +1285,16 @@ def _extract_json_from_tail(text: str) -> str:
         ch = text[end]
         if ch not in "]}":
             continue
+        # 确定匹配的左括号类型
         open_ch = "{" if ch == "}" else "["
-        depth = 1
-        in_string = False
-        escape = False
-        start = -1
+        depth = 1  # 括号嵌套深度计数器
+        in_string = False  # 当前扫描位置是否处于双引号字符串内部
+        escape = False  # 字符串内是否遇到转义反斜杠
+        start = -1  # 匹配到的左括号起始下标
+        # 从闭合括号前一个字符开始向左逆序扫描
         for i in range(end - 1, -1, -1):
             c = text[i]
+            # 注意：逆序扫描字符串时，判断引号是否被前一个字符 '\\' 转义
             if in_string:
                 if escape:
                     escape = False
@@ -1175,12 +1306,15 @@ def _extract_json_from_tail(text: str) -> str:
             if c == '"':
                 in_string = True
             elif c == open_ch:
+                # 遇到左括号，嵌套深度减 1；归零说明找到最外层配对起点
                 depth -= 1
                 if depth == 0:
                     start = i
                     break
             elif c == ch:
+                # 遇到同类型右括号，嵌套深度加 1
                 depth += 1
+        # 若找到配对左括号，截取候选子串并用 json.loads 验证合法性
         if start != -1:
             candidate = text[start : end + 1]
             try:
@@ -1201,15 +1335,18 @@ def extract_usage_from_response(data: dict, api_url: str) -> dict:
     - Anthropic：usage.input_tokens / output_tokens，
       cache 命中在 usage.cache_read_input_tokens
     """
+    # 若响应不是字典结构，直接返回全 0 统计
     if not isinstance(data, dict):
         return {"prompt": 0, "completion": 0, "total": 0, "cached": 0}
 
+    # 内部辅助函数：安全将任意值转为非负整数
     def _int(value) -> int:
         try:
             return int(value or 0)
         except (TypeError, ValueError):
             return 0
 
+    # 1. Ollama 原生接口：字段位于顶层 prompt_eval_count 与 eval_count
     if is_ollama_chat_endpoint(api_url):
         prompt = _int(data.get("prompt_eval_count"))
         completion = _int(data.get("eval_count"))
@@ -1220,28 +1357,42 @@ def extract_usage_from_response(data: dict, api_url: str) -> dict:
             "cached": 0,
         }
 
+    # 2. OpenAI 兼容或 Anthropic 接口：字段位于 usage 子字典
     usage = data.get("usage") or {}
     if not isinstance(usage, dict):
         usage = {}
+    # 兼容 OpenAI (prompt_tokens) 与 Anthropic (input_tokens)
     prompt = _int(usage.get("prompt_tokens") or usage.get("input_tokens"))
+    # 兼容 OpenAI (completion_tokens) 与 Anthropic (output_tokens)
     completion = _int(usage.get("completion_tokens") or usage.get("output_tokens"))
+    # 总 token 数优先取 total_tokens，缺失时由输入+输出相加
     total = _int(usage.get("total_tokens")) or (prompt + completion)
+    # 提取 KV Cache 命中的输入 token 数（兼容 OpenAI details 与 Anthropic cache_read）
     details = usage.get("prompt_tokens_details")
     cached = 0
     if isinstance(details, dict):
         cached = _int(details.get("cached_tokens"))
     cached = cached or _int(usage.get("cache_read_input_tokens"))
-    return {"prompt": prompt, "completion": completion, "total": total, "cached": cached}
+    return {
+        "prompt": prompt,
+        "completion": completion,
+        "total": total,
+        "cached": cached,
+    }
 
 
 def _record_token_usage(config: AiConfig, data: dict, api_url: str) -> None:
     """记录本次调用的 token 消耗（旁路逻辑，失败不影响主流程）。"""
     try:
+        # 延迟导入 db 模块，避免模块初始化阶段产生循环依赖
         import db
 
+        # 提取归一化的 token 消耗字典
         usage = extract_usage_from_response(data, api_url)
+        # 若总量为 0（如接口未返回 usage），跳过写库
         if usage["total"] <= 0:
             return
+        # 写入 SQLite token_usage 表，按调用类别（image_analysis / problem_ai）与模型归集
         db.record_token_usage(
             config.category,
             config.model,
@@ -1250,18 +1401,27 @@ def _record_token_usage(config: AiConfig, data: dict, api_url: str) -> None:
             usage["total"],
             usage["cached"],
         )
+        # 打印本次调用的详细 Token 消耗日志
         logger.info(
             f"[LLM] Token 用量（{config.category}）：prompt={usage['prompt']}, "
             f"completion={usage['completion']}, total={usage['total']}"
             + (f", cached={usage['cached']}" if usage["cached"] else "")
         )
     except Exception as exc:  # noqa: BLE001
+        # 旁路统计异常只打 warning，绝不中断主业务流程
         logger.warning(f"[LLM] Token 用量记录失败（不影响分析）：{exc}")
 
 
 def extract_text_from_response(data: dict, api_url: str) -> str:
-    """从 AI 响应中提取文本内容"""
+    """从不同厂商的 AI API 响应字典中提取模型生成的文本内容。
+
+    支持 Anthropic (/v1/messages)、Ollama (/api/chat)、DeepSeek 推理模型以及
+    通用 OpenAI 兼容端点 (/v1/chat/completions)。针对推理模型带有 thinking /
+    reasoning_content 字段的情况提供尾部 JSON 抽取与兜底回退机制。
+    """
+    # 1. Anthropic 端点：响应格式为 {"content": [{"type": "text", "text": "..."}]}
     if is_anthropic_endpoint(api_url):
+        # 遍历 content 数组，找到第一个 type 为 "text" 的内容块
         text_block = next(
             (
                 block
@@ -1270,38 +1430,45 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
             ),
             None,
         )
+        # 若找到文本块则返回其 text 字段，否则返回空字符串
         return text_block["text"] if text_block else ""
 
+    # 2. Ollama /api/chat 端点：响应格式为 {"message": {"content": "...", "thinking": "..."}}
     if is_ollama_chat_endpoint(api_url):
         message = data.get("message", {})
         content = message.get("content", "")
         thinking = message.get("thinking", "")
+        # 优先使用正式输出的 content 字段
         if isinstance(content, str) and content.strip():
             return content
+        # 若本地推理模型将内容放在了 thinking 字段且 content 为空，则回退读取 thinking
         if isinstance(thinking, str) and thinking.strip():
             logger.info("[LLM] Ollama content 为空，使用 thinking 字段")
             return thinking
         return ""
 
+    # 3. OpenAI 兼容端点（含 DeepSeek）：取 choices[0].message 及其结束原因 finish_reason
     message = data.get("choices", [{}])[0].get("message", {})
     finish_reason = data.get("choices", [{}])[0].get("finish_reason", "")
     content = message.get("content", "")
     reasoning = message.get("reasoning", "")
     reasoning_content = message.get("reasoning_content", "")
 
-    # 为了调试，打印输出 content 的内容
+    # 记录调试日志：输出原始 content 和 finish_reason（如 stop / length）
     logger.debug(f"[LLM] content: {content}")
     if finish_reason:
         logger.info(f"[LLM] finish_reason: {finish_reason}")
 
-    # DeepSeek（推理模型）：最终答案直接写在 content 字段，且本身就是完整 JSON。
-    # 直接从 content 提取 JSON 返回，不走 reasoning 回退逻辑。
-    # 注意：content 为空时不要回退到 reasoning_content（那是思考过程，不是答案），
-    # 直接失败并提示，避免静默返回空结构。
+    # 4. DeepSeek 专属分支：最终答案直接写在 content 字段，且本身应为完整 JSON。
+    # 直接从 content 尾部提取 JSON 返回，不走 reasoning 回退逻辑。
+    # 注意：content 为空时绝不回退到 reasoning_content（那是思考过程而非答案），
+    # 而是直接报错提示，避免把半截推理当成结果静默返回。
     if is_deepseek_endpoint(api_url):
         if isinstance(content, str) and content.strip():
+            # 尝试从 content 末尾提取平衡括号的 JSON 子串
             tail_json = _extract_json_from_tail(content)
             return tail_json if tail_json else content.strip()
+        # 若因 max_tokens 耗尽被截断（finish_reason=="length"），给出明确调参提示
         if finish_reason == "length":
             logger.error(
                 "[LLM] DeepSeek 输出被 max_tokens 截断（finish_reason=length），content 为空，请调大 AI_MAX_TOKENS"
@@ -1310,11 +1477,12 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
             logger.error("[LLM] DeepSeek content 为空，未生成最终 JSON")
         return ""
 
+    # 5. 常规 OpenAI 兼容模型：若 content 为非空字符串，直接返回
     if isinstance(content, str) and content.strip():
         return content
 
-    # 其他 OpenAI 兼容推理模型可能把最终答案放在 reasoning / reasoning_content，
-    # 若 content 为空则回退到这两个字段。
+    # 6. 其他 OpenAI 兼容推理模型回退：部分模型可能把最终答案混在 reasoning / reasoning_content 中，
+    # 若主字段 content 为空，则依次尝试从这两个推理字段末尾抽取完整 JSON。
     for field_name, field_value in (
         ("reasoning", reasoning),
         ("reasoning_content", reasoning_content),
@@ -1329,6 +1497,8 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
                     "[LLM] 输出被 max_tokens 截断（finish_reason=length），未生成完整 JSON，请调大 AI_MAX_TOKENS"
                 )
             return field_value
+
+    # 7. 多模态列表型 content 兼容：若 content 是分段列表，拼接其中所有 type=="text" 的文本片段
     if isinstance(content, list):
         return "".join(
             item.get("text", "") for item in content if item.get("type") == "text"
@@ -1358,7 +1528,17 @@ _IMAGE_BLIND_MARKERS = (
 
 
 def is_image_unsupported_error(detail: str) -> bool:
-    """判断报错信息是否表示端点/模型不接受图片输入。"""
+    """判断报错信息是否表示端点/模型不接受图片输入。
+
+    通过常见错误关键词（如 unknown variant `image_url`、expected `text` 等）
+    识别因模型不支持多模态而导致的拒绝错误。
+
+    Args:
+        detail: HTTP 错误响应体中的异常详情文本
+
+    Returns:
+        bool: True 表示因不支持图片而失败，否则为 False
+    """
     lowered = detail.lower()
     return (
         "unknown variant `image_url`" in lowered
@@ -1373,31 +1553,62 @@ def looks_like_image_blind_response(text: str) -> bool:
     """判断图片提取结果是否为「模型看不到图片」的推诿回答。
 
     文本模型收到 base64 文本时会礼貌地表示无法解码图片，这类回答会被误当成题目内容
-    传给后续解题分析，必须提前拦下来。
+    传给后续解题分析，必须提前拦截并抛出清晰明确的配置报错提示。
+
+    Args:
+        text: 模型生成的文本内容
+
+    Returns:
+        bool: True 表示模型未能真正读取视觉内容
     """
     if not text or not text.strip():
         return True
     lowered = text.lower()
+    # 只要命中任意一个推诿特征标记，即判定为视盲回答
     return any(marker.lower() in lowered for marker in _IMAGE_BLIND_MARKERS)
 
 
 def format_ai_error(detail: str) -> str:
+    """格式化 AI 报错信息，针对不支持图片的情况转换为友好指导。
+
+    Args:
+        detail: 原始异常信息或 HTTP 响应体文本
+
+    Returns:
+        str: 友好的报错提示文案
+    """
     if is_image_unsupported_error(detail):
         return IMAGE_UNSUPPORTED_HINT
     return f"AI API error: {detail}"
 
 
 def parse_analysis_result(raw_text: str) -> dict:
-    """解析 AI 返回的 JSON 文本，提取 content/tags"""
+    """解析 AI 返回的 JSON 文本，提取 content、summary、tags 和 difficulty。
+
+    支持对 markdown 代码块标记去除、前缀杂质消除、流式截断以及平衡括号容错，
+    确保在模型输出微小瑕疵时仍能稳健解析。
+
+    Args:
+        raw_text: 模型生成的原始文本字符串
+
+    Returns:
+        dict: 结构化分析字典，包含 content, summary, tags, difficulty 字段
+
+    Raises:
+        json.JSONDecodeError: 无法从文本中解析出合法的 JSON 结构
+    """
     cleaned = raw_text.strip()
+    # 剔除首尾可能包裹的 markdown json 代码块标记
     cleaned = re.sub(r"^```json\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^```\s*", "", cleaned)
     cleaned = re.sub(r"```\s*$", "", cleaned)
     cleaned = cleaned.strip()
 
     try:
+        # 首先尝试直接全量解析为 JSON
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
+        # 若直接解析失败，使用 raw_decode 从文本中首个 '[' 或 '{' 位置开始尝试增量解码
         decoder = json.JSONDecoder()
         start_positions = [
             idx for idx in (cleaned.find("["), cleaned.find("{")) if idx != -1
@@ -1409,15 +1620,20 @@ def parse_analysis_result(raw_text: str) -> dict:
                 break
             except json.JSONDecodeError:
                 continue
+        # 若仍未成功解析出任何 JSON，抛出原始异常
         if parsed is None:
             raise
+
+    # 字段初始化
     content = ""
     summary = ""
     difficulty = 3
     tags = []
+
+    # 分支 1：模型仅返回了标签列表（如 ["考点1", "考点2"]）
     if isinstance(parsed, list):
-        # 模型可能只返回了 tags 数组（不完整输出），尝试从数组中提取
         tags = [t for t in parsed if isinstance(t, str)]
+    # 分支 2：标准 JSON 字典格式
     elif isinstance(parsed, dict):
         tags = parsed.get("tags") if isinstance(parsed.get("tags"), list) else []
         content = (
@@ -1426,6 +1642,7 @@ def parse_analysis_result(raw_text: str) -> dict:
         summary = (
             parsed.get("summary", "") if isinstance(parsed.get("summary"), str) else ""
         )
+        # 难度字段容错提取与钳位（1 - 5 星）
         raw_difficulty = parsed.get("difficulty")
         if isinstance(raw_difficulty, bool):
             difficulty = 3
@@ -1435,12 +1652,13 @@ def parse_analysis_result(raw_text: str) -> dict:
             m = re.search(r"(\d+)", raw_difficulty)
             if m:
                 difficulty = int(m.group(1))
+        # 限制在合法数值区间 [1, 5]
         if difficulty < 1:
             difficulty = 1
         elif difficulty > 5:
             difficulty = 5
 
-    # 兜底：若 summary 仍为空，尝试从原始文本中提取 summary 字段值
+    # 兜底：若 summary 仍为空，尝试通过正则从原始文本中提取 "summary": "..." 字符串
     if not summary.strip() and cleaned:
         m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned, re.DOTALL)
         if m:
@@ -1448,6 +1666,7 @@ def parse_analysis_result(raw_text: str) -> dict:
             if extracted:
                 summary = extracted
 
+    # 若核心字段解析结果全部为空，记录警告日志以便排查截断
     if not summary.strip() and not tags:
         logger.warning(
             f"[LLM] 解析结果为空（summary/tags 均缺失），原始文本可能是被截断的推理内容：{cleaned[:200]}"
@@ -1462,14 +1681,23 @@ def parse_analysis_result(raw_text: str) -> dict:
 
 
 def parse_extraction_result(raw_text: str) -> str:
-    """解析题目内容提取结果，返回 content 文本"""
+    """解析题目内容提取结果，返回清晰无 markdown 干扰的题目文本。
+
+    Args:
+        raw_text: 视觉模型提取题目内容返回的原始文本
+
+    Returns:
+        str: 规整后的题目纯文本内容
+    """
     cleaned = raw_text.strip()
+    # 剥离首尾代码块标记
     cleaned = re.sub(r"^```\s*", "", cleaned)
     cleaned = re.sub(r"```\s*$", "", cleaned)
     cleaned = cleaned.strip()
     if not cleaned:
         return ""
-    # 兼容部分模型用 JSON 包装返回的情况
+
+    # 兼容部分模型错误使用 JSON 格式包裹题目文本的情况（如 {"content": "..."}）
     try:
         parsed = json.loads(cleaned)
         if isinstance(parsed, dict):
@@ -1486,14 +1714,28 @@ def parse_extraction_result(raw_text: str) -> str:
 
 
 def _encode_image(image_path: str) -> tuple[str, str]:
-    """读取图片并返回 (image_base64, data_uri)"""
+    """读取本地磁盘图片文件并进行 Base64 编码，构造标准 Data URI。
+
+    Args:
+        image_path: 目标图片的绝对或相对路径
+
+    Returns:
+        tuple[str, str]: (纯 base64 字符串, 带 MIME 的 data:image/...;base64,... URI)
+
+    Raises:
+        FileNotFoundError: 图片文件在磁盘上不存在
+    """
+    # 检查文件物理存在性
     if not os.path.isfile(image_path):
         raise FileNotFoundError(f"图片文件不存在：{image_path}")
 
+    # 读取二进制文件内容
     with open(image_path, "rb") as f:
         image_data = f.read()
+    # 将二进制字节转换为标准 Base64 编码的 UTF-8 字符串
     image_base64 = base64.b64encode(image_data).decode("utf-8")
 
+    # 根据文件扩展名映射标准 MIME 类型
     ext = os.path.splitext(image_path)[1].lower()
     mime_map = {
         ".jpg": "image/jpeg",
@@ -1504,6 +1746,7 @@ def _encode_image(image_path: str) -> tuple[str, str]:
         ".bmp": "image/bmp",
     }
     mime_type = mime_map.get(ext, "image/jpeg")
+    # 构造标准的 Data URI 格式
     data_uri = f"data:{mime_type};base64,{image_base64}"
 
     logger.info(f"[LLM] 图片已编码，大小：{len(image_data)} bytes, MIME: {mime_type}")
@@ -1513,11 +1756,29 @@ def _encode_image(image_path: str) -> tuple[str, str]:
 async def _call_ai(
     config: AiConfig, api_url: str, data_uri: str, image_base64: str, prompt: str
 ) -> str:
-    """构建请求并调用 AI，返回响应文本"""
+    """统一构建请求并异步调用目标 AI 端点，返回大模型生成的文本内容。
+
+    包含超时控制、HTTP 异常拦截、Token 旁路统计以及输出有效性校验。
+
+    Args:
+        config: 本次调用的 AI 模型与网络配置
+        api_url: 已归一化的 API 请求目标端点
+        data_uri: 图片的 Data URI 字符串（若纯文本则为空）
+        image_base64: 图片纯 Base64 编码字符串（若纯文本则为空）
+        prompt: 传递给模型的用户指令 / 提示词
+
+    Returns:
+        str: 模型输出的文本字符串
+
+    Raises:
+        RuntimeError: HTTP 状态码异常、不支持图片或模型未返回任何文本内容
+    """
+    # 1. 组装请求头与 JSON 请求体
     request = build_analyze_request(config, api_url, data_uri, image_base64, prompt)
     # 本次请求是否真的带了图片（决定报错时是否可以提示「模型不支持图片」）
     image_included = bool(data_uri or image_base64)
 
+    # 2. 发起异步 HTTP POST 请求（设置超时并在代理配置下信任系统环境）
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(config.timeout), trust_env=False
     ) as client:
@@ -1527,9 +1788,11 @@ async def _call_ai(
 
     logger.info(f"[LLM] AI 响应：status={resp.status_code}, len={len(resp.text)}")
 
+    # 3. 处理失败状态码
     if not resp.is_success:
         err_detail = f"HTTP {resp.status_code} {resp.reason_phrase}"
         try:
+            # 尝试从服务端 JSON 错误体中提取 error.message 或 detail
             err_data = resp.json()
             err_detail = (
                 err_data.get("error", {}).get("message")
@@ -1538,18 +1801,22 @@ async def _call_ai(
                 or err_detail
             )
         except Exception:
+            # 若不是 JSON，剔除 HTML 标签后截取前 200 字
             text_snippet = re.sub(r"<[^>]+>", "", resp.text).strip()[:200]
             if text_snippet:
                 err_detail = f"HTTP {resp.status_code}: {text_snippet}"
+        # 若带有图片且错误表明不支持图片，输出专项排查指引
         if image_included and is_image_unsupported_error(err_detail):
             logger.error(f"[LLM] AI 服务不接受图片输入（image_url）：{err_detail}")
             raise RuntimeError(IMAGE_UNSUPPORTED_HINT)
         logger.error(f"[LLM] AI 调用失败：{err_detail}")
         raise RuntimeError(format_ai_error(err_detail))
 
+    # 4. 解析成功响应，记录 token 用量并提取文本
     data = resp.json()
     _record_token_usage(config, data, api_url)
     response_text = extract_text_from_response(data, api_url)
+    # 若模型返回文本为空，抛出异常提示
     if not response_text:
         logger.error(
             f"[LLM] AI 返回无文本内容：{json.dumps(data, ensure_ascii=False)[:500]}"
@@ -1581,13 +1848,16 @@ async def extract_problem_content(
         ValueError: AI 配置无效
         RuntimeError: AI 调用失败
     """
+    # 缺省时读取专用图片提取配置
     if config is None:
         config = AiConfig.for_image_analysis()
 
     logger.info(f"[LLM] 开始提取图片题目内容：{image_path}")
 
+    # 读取本地磁盘图片并完成 Base64 编码
     image_base64, data_uri = _encode_image(image_path)
 
+    # 校验端点和模型参数
     api_url = normalize_api_url(config.api_url)
     if not api_url or not config.model.strip():
         raise ValueError("AI 配置不完整：请设置 API URL 和模型名")
@@ -1597,10 +1867,12 @@ async def extract_problem_content(
     logger.info(
         f"[LLM] 调用 AI API（提取题目内容）: url={api_url}, model={config.model}"
     )
+    # 调用视觉模型执行结构化解构与提取
     response_text = await _call_ai(
         config, api_url, data_uri, image_base64, PROBLEM_EXTRACTION_PROMPT
     )
     content = parse_extraction_result(response_text)
+    # 检查模型是否由于视盲返回推诿话术
     if looks_like_image_blind_response(content):
         logger.error(
             f"[LLM] 图片题目提取失败：模型未真正读取图片（model={config.model}），"
@@ -1622,30 +1894,33 @@ async def analyze_image(
     user_prompt: str | None = None,
     previous_summary: str | None = None,
 ) -> dict:
-    """
-    分析错题图片，返回 {content, summary, tags, difficulty}。
+    """分析错题图片，返回 {content, summary, tags, difficulty}。
 
-    题目提取（图片 OCR）与解题分析使用两套独立 AI 配置：
-        - image_config: 从图片提取完整题目内容（需视觉模型）
-        - problem_config: 基于题目文本做解题分析（summary/tags/difficulty，文本模型即可）
+    采用两阶段流水线架构：
+    1. 题目提取阶段（图片 OCR / 几何物理语义解构）：
+       使用 image_config（多模态视觉大模型）从错题图片中提取高保真、结构化的完整题目（LaTeX 公式 + 场景解构）；
+       若调用方已显式传入已提取的 content，则智能跳过此阶段节省 Token 和耗时。
+    2. 解题思路与考点分析阶段：
+       使用 problem_config（高推理能力纯文本模型）对题目文本进行审题推导，生成逐问解题思路、核心考点标签以及 1-5 星难度。
 
     Args:
-        image_path: 图片文件的绝对路径
-        image_config: 图片题目提取 AI 配置，若为 None 则从 .env 读取
-        problem_config: 解题分析 AI 配置，若为 None 则从 .env 读取
-        subject: 学科名称（数学/物理/化学/英语/语文），用于选择知识点列表
-        content: 已提取的题目内容，若提供则跳过 OCR 提取步骤
-        user_prompt: 用户自定义的解题方向/知识范围约束（可选），会附加到分析 prompt 中
-        previous_summary: 上一次 AI 生成的解题思路（可选），重新分析时在此基础上改进
+        image_path: 图片文件的绝对物理路径
+        image_config: 图片题目提取 AI 配置（视觉模型），为 None 则自动读取 .env
+        problem_config: 解题分析 AI 配置（文本推理模型），为 None 则自动读取 .env
+        subject: 学科名称（数学/物理/化学/英语/语文），用于加载标准考点和 Prompt 角色
+        content: 已提取的题目内容，若非空则直接复用并跳过 OCR 阶段
+        user_prompt: 用户自定义的解题约束（如"还没学微积分"、"重点讲第2问"），注入 Prompt
+        previous_summary: 上一次生成的解题思路，重新分析时在此基础上修正与改进
 
     Returns:
-        {'content': str, 'summary': str, 'tags': list[str], 'difficulty': int}
+        dict: 包含 'content', 'summary', 'tags', 'difficulty' 四个字段的结果字典
 
     Raises:
-        FileNotFoundError: 图片文件不存在
-        ValueError: AI 配置无效
-        RuntimeError: AI 调用失败
+        FileNotFoundError: 图片文件物理路径不存在
+        ValueError: 缺少必要的 API URL、模型名称或缺少鉴权 Key
+        RuntimeError: 模型调用失败、输出非法或未生成有效结果
     """
+    # 缺省时分别初始化两套独立的配置
     if image_config is None:
         image_config = AiConfig.for_image_analysis()
     if problem_config is None:
@@ -1653,12 +1928,14 @@ async def analyze_image(
 
     logger.info(f"[LLM] 开始分析图片：{image_path}")
 
+    # 校验阶段 1（图片提取）配置有效性
     image_api_url = normalize_api_url(image_config.api_url)
     if not image_api_url or not image_config.model.strip():
         raise ValueError("AI 配置不完整（图片提取）：请设置 API URL 和模型名")
     if should_require_api_key(image_api_url) and not image_config.api_key:
         raise ValueError("该端点需要 API Key（图片提取）")
 
+    # 校验阶段 2（解题分析）配置有效性
     problem_api_url = normalize_api_url(problem_config.api_url)
     if not problem_api_url or not problem_config.model.strip():
         raise ValueError("AI 配置不完整（解题分析）：请设置 API URL 和模型名")
@@ -1669,15 +1946,17 @@ async def analyze_image(
     if content:
         logger.info(f"[LLM] 使用调用方提供的题目内容（跳过 OCR）")
     else:
+        # 调用视觉大模型执行图片 OCR 与解构
         content = await extract_problem_content(image_path, image_config)
         logger.info(
             f"[LLM] 题目内容：{content if len(content) < 100 else content[:100] }"
         )
 
-    # 2. 基于题目内容构建分析 prompt 并调用 AI（纯文本，使用解题分析配置）
+    # 2. 基于题目内容构建解题分析 Prompt 并调用 AI（纯文本请求）
     logger.info(
         f"[LLM] 调用 AI API（解题分析）: url={problem_api_url}, model={problem_config.model}"
     )
+    # 根据模型上下文能力与考点库组装完整 Prompt
     prompt = build_analysis_prompt(
         subject,
         content,
@@ -1686,6 +1965,7 @@ async def analyze_image(
         model=problem_config.model,
         api_url=problem_api_url,
     )
+    # 打印当前考点预算信息以供监控
     kp_budget = resolve_knowledge_point_token_budget(
         problem_config.model, problem_api_url
     )
@@ -1699,23 +1979,25 @@ async def analyze_image(
         logger.info(
             f"[LLM] 已附带上一次 AI 解题思路（{len(previous_summary)} 字）作为参考"
         )
+    # 发起纯文本 HTTP 请求
     response_text = await _call_ai(problem_config, problem_api_url, "", "", prompt)
 
-    # 3. 解析 JSON 结果
+    # 3. 解析模型输出的 JSON 结构
     try:
         result = parse_analysis_result(response_text)
     except json.JSONDecodeError as e:
         logger.error(f"[LLM] JSON 解析失败：{e}, raw={response_text[:300]}")
         raise RuntimeError(f"AI 返回的不是有效 JSON: {e}")
 
+    # 4. 将 AI 生成的标签映射回当前学科的官方标准考点库
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
     result["tags"] = _map_tags_to_knowledge_points(
         result.get("tags", []), cfg.get("knowledge_points", [])
     )
 
-    # 4. 提取的 content 作为最终 content 值
+    # 5. 回填提取的题目文本作为最终 content 字段
     result["content"] = content
-    # 日志记录 summary 信息
+    # 打印最终成果日志
     logger.info(f'[LLM] 解题思路：{result["summary"]}')
     logger.info(f'[LLM] 解析成功：tags={result["tags"]}')
     return result
@@ -1738,8 +2020,18 @@ ENCOURAGEMENT_SINGLE_PROMPT = """你是一名学习督促助手。请为下面�
 
 
 def parse_encouragement_result(raw_text: str) -> list[dict]:
-    """解析鼓励语 AI 响应，返回 [{file_path, message}, ...]"""
+    """解析批量鼓励语 AI 响应，提取规范的条目列表 [{file_path, message}, ...]。
+
+    兼容列表形态、对象形态（含 reminders/items/results 嵌套或以 path 为 key 的键值对）。
+
+    Args:
+        raw_text: 模型生成的原始文本
+
+    Returns:
+        list[dict]: 归一化后的鼓励语字典列表
+    """
     cleaned = raw_text.strip()
+    # 剥离代码块外壳
     cleaned = re.sub(r"^```json\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^```\s*", "", cleaned)
     cleaned = re.sub(r"```\s*$", "", cleaned)
@@ -1748,18 +2040,23 @@ def parse_encouragement_result(raw_text: str) -> list[dict]:
     if not cleaned:
         return []
 
+    # 辅助转换函数：统一抹平各种 JSON 异构格式
     def normalize_entries(value):
+        # 已经是标准数组
         if isinstance(value, list):
             return value
         if isinstance(value, dict):
+            # 单条对象形态 {"file_path": "...", "message": "..."}
             if isinstance(value.get("file_path"), str) and isinstance(
                 value.get("message"), str
             ):
                 return [value]
+            # 常见包裹键解析
             for key in ("reminders", "items", "results", "data"):
                 nested = value.get(key)
                 if isinstance(nested, list):
                     return nested
+            # 字典映射形态 {"path1": "msg1", "path2": "msg2"}
             if value and all(
                 isinstance(k, str) and isinstance(v, str) for k, v in value.items()
             ):
@@ -1768,6 +2065,7 @@ def parse_encouragement_result(raw_text: str) -> list[dict]:
                 ]
         return []
 
+    # 尝试解析为 JSON
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
@@ -1785,6 +2083,8 @@ def parse_encouragement_result(raw_text: str) -> list[dict]:
         if parsed is None:
             logger.warning(f"[Encourage] 响应不是 JSON，已忽略：{cleaned[:80]}")
             return []
+
+    # 归一化返回
     entries = normalize_entries(parsed)
     if not entries:
         logger.warning(
@@ -1795,8 +2095,21 @@ def parse_encouragement_result(raw_text: str) -> list[dict]:
 
 
 def load_json_relaxed(raw_text: str) -> dict:
-    """宽松解析 AI 返回的 JSON，兼容前后夹杂少量说明文本的情况。"""
+    """宽松解析 AI 返回的 JSON，兼容前后夹杂思考过程或说明文字的场景。
+
+    先尝试严格 json.loads；若失败则通过 raw_decode 寻找首个 '{' 或 '[' 起始的合法结构。
+
+    Args:
+        raw_text: 包含 JSON 内容的原始文本
+
+    Returns:
+        dict: 解码后的字典对象
+
+    Raises:
+        json.JSONDecodeError: 未能检测到任何有效 JSON 对象
+    """
     cleaned = raw_text.strip()
+    # 1. 尝试全量直接解析
     try:
         parsed = json.loads(cleaned)
         if isinstance(parsed, dict):
@@ -1804,6 +2117,7 @@ def load_json_relaxed(raw_text: str) -> dict:
     except json.JSONDecodeError:
         pass
 
+    # 2. 尝试从首个 '{' 或 '[' 处寻找合法 JSON 子串
     decoder = json.JSONDecoder()
     for start in (cleaned.find("{"), cleaned.find("[")):
         if start == -1:
@@ -1823,19 +2137,32 @@ async def _generate_single_encouragement(
     ai_config: AiConfig,
     api_url: str,
 ) -> str:
-    """为单个题目调用 AI 生成一条鼓励语，返回 message 文本，失败返回空字符串"""
+    """为单道错题独立调用 AI 生成个性化督促鼓励语。
+
+    Args:
+        item: 错题元数据字典，包含 title, subject, inactive_hours 等
+        ai_config: AI 基础配置
+        api_url: API 访问端点
+
+    Returns:
+        str: 生成的鼓励语文案；若失败则返回空字符串供上层回退
+    """
     file_path = item.get("file_path", "") or ""
     title = item.get("title", "") or ""
     subject = item.get("subject", "") or ""
+    # 将未复习小时数折算为天数（保留一位小数）
     days = round((item.get("inactive_hours", 0) or 0) / 24, 1)
 
+    # 组装针对当前错题的上下文描述
     items_text = f"- 题目：{title if title else '未命名'}\n  学科：{subject if subject else '未分类'}\n  已 {days} 天未练习"
     prompt = ENCOURAGEMENT_SINGLE_PROMPT + "\n\n" + items_text
 
+    # 组装请求头与鉴权
     headers = {"Content-Type": "application/json"}
     if ai_config.api_key:
         headers["Authorization"] = f"Bearer {ai_config.api_key}"
 
+    # 构造请求体
     body = {
         "model": ai_config.model,
         "max_tokens": ai_config.max_tokens,
@@ -1843,12 +2170,14 @@ async def _generate_single_encouragement(
         "messages": [{"role": "user", "content": prompt}],
     }
 
+    # Ollama 端点特殊参数注入（格式化为 json 并关闭推理）
     if is_ollama_chat_endpoint(api_url):
         body["think"] = False
         body["format"] = "json"
         body["options"] = {"num_predict": ai_config.max_tokens}
 
     try:
+        # 异步调用模型
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(ai_config.timeout), trust_env=False
         ) as client:
@@ -1866,13 +2195,14 @@ async def _generate_single_encouragement(
             )
             return ""
 
+        # 提取文本内容
         response_data = load_json_relaxed(resp.text)
         response_text = extract_text_from_response(response_data, api_url)
         if not response_text:
             logger.warning(f"[Encourage] AI 返回空文本，file_path={file_path}")
             return ""
 
-        # 解析单条 JSON：{"message": "..."}
+        # 清洗包裹符号
         cleaned = response_text.strip()
         cleaned = re.sub(r"^```json\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"^```\s*", "", cleaned)
@@ -1898,17 +2228,18 @@ async def _generate_single_encouragement(
             else:
                 parsed = None
 
+        # 提取 message 字段
         if isinstance(parsed, dict):
             msg = parsed.get("message", "") or ""
             if isinstance(msg, str) and msg.strip():
                 return msg.strip()
-            # 兼容旧格式：直接返回无 message 键时整个文本当 message
+            # 记录异常结构
             logger.warning(
                 f"[Encourage] JSON 中无有效 message 字段：{cleaned[:200]}, file_path={file_path}"
             )
             return ""
 
-        # 如果 AI 直接返回了纯文本（无 JSON），直接当 message 用
+        # 如果 AI 直接返回了纯文本（无 JSON 外壳），且字数适中，直接使用
         text = cleaned.strip().strip('"\'"')
         if text and len(text) < 100:
             logger.info(
@@ -1927,16 +2258,19 @@ async def _generate_single_encouragement(
 
 
 async def generate_encouragements(items: list[dict]) -> dict:
-    """
-    逐题单独调用 AI 生成鼓励语。
-    items: [{title, subject, tags, inactive_hours, is_focus_overdue, file_path}, ...]
-    返回：{file_path: message, ...}
-    每道题独立调一次 LLM，互不影响。
+    """逐题单独调用 AI 生成个性化鼓励语。
 
-    使用图像分析配置（IMAGE_*）访问 AI。
+    对传入的待复习错题列表逐一发起 LLM 请求，彼此隔离互不影响；
+    若单题生成失败则使用温和的默认天数提示作为兜底。
+
+    Args:
+        items: 待鼓励错题元数据列表，每个元素包含 title, subject, tags, inactive_hours, file_path 等
+
+    Returns:
+        dict: 映射关系字典 {file_path: message, ...}
     """
+    # 采用图像分析环境的 AI 配置
     ai_config = AiConfig.for_image_analysis()
-    # 鼓励语为短文本，沿用原有输出预算
     ai_config.timeout = 120.0
     ai_config.max_tokens = 1024
     api_url = normalize_api_url(ai_config.api_url)
@@ -1947,11 +2281,13 @@ async def generate_encouragements(items: list[dict]) -> dict:
     logger.info(f"[Encourage] 将逐题调用 AI 生成鼓励语，共 {len(items)} 题")
 
     result: dict[str, str] = {}
+    # 遍历题目列表，串行逐一生成（避免对并发或频控造成压力）
     for idx, item in enumerate(items):
         fp = item.get("file_path", "") or ""
         if not fp:
             continue
         logger.info(f"[Encourage] [{idx + 1}/{len(items)}] 正在生成，file_path={fp}")
+        # 发起单个错题生成
         msg = await _generate_single_encouragement(item, ai_config, api_url)
         if msg:
             result[fp] = msg
@@ -2002,12 +2338,19 @@ def parse_similar_rerank_result(raw_text: str) -> list[dict]:
     """解析精排响应，返回按相关度降序的 [{index, kind, reason}, ...]。
 
     兼容 {"ranked": [...]} 与顶层数组两种形态；字段缺失或类型错误的条目会被丢弃。
+
+    Args:
+        raw_text: 模型返回的精排 JSON 文本
+
+    Returns:
+        list[dict]: 校验合法的精排条目列表
     """
     if not raw_text or not raw_text.strip():
         return []
 
     payload: Any = None
     try:
+        # 首先尝试宽松 JSON 解析
         payload = load_json_relaxed(raw_text)
     except json.JSONDecodeError:
         # 退而求其次：从末尾尝试提取 JSON（推理模型常在结尾输出答案）
@@ -2021,9 +2364,10 @@ def parse_similar_rerank_result(raw_text: str) -> list[dict]:
             logger.warning(f"[Rerank] 精排响应不是合法 JSON：{raw_text[:200]}")
             return []
 
+    # 提取 ranked 数组
     ranked = payload.get("ranked") if isinstance(payload, dict) else payload
     if isinstance(payload, dict) and not isinstance(ranked, list):
-        # 兼容直接输出单个对象 {"index": ..., "kind": ..., "reason": ...}
+        # 兼容直接输出单个对象 {"index": ..., "kind": ..., "reason": ...} 的情况
         ranked = [payload]
     if not isinstance(ranked, list):
         logger.warning(f"[Rerank] 期望数组形态，实际得到 {type(ranked).__name__}")
@@ -2031,17 +2375,23 @@ def parse_similar_rerank_result(raw_text: str) -> list[dict]:
 
     entries: list[dict] = []
     seen: set[int] = set()
+    # 逐条清洗并校验候选编号与类型
     for raw in ranked:
         if not isinstance(raw, dict):
             continue
+        raw_index = raw.get("index")
+        if raw_index is None:
+            continue
         try:
-            index = int(raw.get("index"))
+            index = int(raw_index)
         except (TypeError, ValueError):
             continue
+        # 重复序号去重
         if index in seen:
             continue
         seen.add(index)
         kind = str(raw.get("kind") or "").strip().lower()
+        # 仅接受预定义的关联系数标签
         if kind not in ("same", "variant", "similar"):
             continue
         reason = str(raw.get("reason") or "").strip()
@@ -2055,22 +2405,26 @@ async def rerank_similar_problems(
     config: Optional[AiConfig] = None,
     api_url: str = "",
 ) -> list[dict]:
-    """让 LLM 从本地粗筛候选里挑出真正相关（same/variant/similar）的题。
+    """让 LLM 从本地粗筛候选里挑出真正相关（same/variant/similar）的题目。
+
+    通过压缩候选题目特征（标题截断、思路摘要、知识点标签），构建对比 Prompt
+    交由大模型进行深度语义判断与去重，消除粗筛中的假阳性。
 
     Args:
         query_text: 查询题的完整文本（最长取前 2000 字）
-        candidates: find_similar_problems() 返回的候选 dict 列表
+        candidates: find_similar_problems() 返回的候选字典列表
         config: AI 配置，默认读取 .env 的解题分析配置（纯文本模型即可）
-        api_url: 已归一化端点；未提供时按 config.api_url 归一化
+        api_url: 已归一化端点；未提供时按 config.api_url 自动归一化
 
     Returns:
-        按相关度降序的条目列表：
-        [{"index": int（指向 candidates 的下标）, "kind": str, "reason": str}, ...]
+        list[dict]: 按相关度降序排列的精排条目列表：
+                    [{"index": int（指向 candidates 下标）, "kind": str, "reason": str}, ...]
 
     Raises:
-        ValueError: AI 配置不完整
+        ValueError: AI 配置不完整（缺少 URL 或模型名）
         RuntimeError: AI 调用失败
     """
+    # 缺省时使用解题分析配置（文本模型）
     if config is None:
         config = AiConfig.for_problem_analysis()
     if not api_url:
@@ -2080,10 +2434,11 @@ async def rerank_similar_problems(
     if should_require_api_key(api_url) and not config.api_key:
         raise ValueError("该端点需要 API Key（相似题精排）")
 
-    # 压缩候选文本：title 截断 + summary 前段 + tags，控制输入规模
+    # 压缩候选文本：title 截断 + summary 前段 + tags，严格控制 Prompt 长度
     lines: list[str] = []
     for i, cand in enumerate(candidates):
         summary = (cand.get("summary") or "").strip()
+        # 控制每个候选摘要的长度，避免 Prompt 爆炸
         if len(summary) > _CANDIDATE_SUMMARY_CAP:
             summary = summary[:_CANDIDATE_SUMMARY_CAP] + "……"
         tags = "、".join(cand.get("tags") or [])[:80]
@@ -2093,6 +2448,7 @@ async def rerank_similar_problems(
             f"    知识点标签：{tags or '（无）'}"
         )
     numbered = "\n".join(lines)
+    # 格式化 Prompt，限制查询题长度上限为 2000 字
     prompt = SIMILAR_RERANK_PROMPT.format(
         query=(query_text or "").strip()[:2000], numbered=numbered
     )
@@ -2101,7 +2457,9 @@ async def rerank_similar_problems(
         f"[Rerank] 精排调用 AI：url={api_url}, model={config.model}, "
         f"candidates={len(candidates)}, prompt_len={len(prompt)}"
     )
+    # 调用 AI 端点
     response_text = await _call_ai(config, api_url, "", "", prompt)
+    # 解析精排结果
     entries = parse_similar_rerank_result(response_text)
     if not entries:
         logger.warning(f"[Rerank] AI 未返回任何有效条目，raw={response_text[:300]}")

@@ -1,9 +1,9 @@
 '''
 Author: calm.wu wubo0067@hotmail.com
 Date: 2026-07-03 09:00:05
-LastEditors: calm.wu wubo0067@hotmail.com
-LastEditTime: 2026-09-12 17:24:41
-FilePath: server/log.py
+LastEditors: calm.wu
+LastEditTime: 2026-09-17 20:33:24
+FilePath: /Smart-Mistake-Lab/server/log.py
 Description: 日志模块，提供统一的日志记录接口，支持控制台输出和文件滚动存储。
 
 Copyright (c) 2026 by ${git_name_email}, All Rights Reserved.
@@ -18,6 +18,7 @@ from logging.handlers import RotatingFileHandler
 LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'logs')
 LOG_FILE = os.path.join(LOG_DIR, 'server.log')
 
+# 创建日志文件夹
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LOG_FORMAT = '%(asctime)s | %(levelname)-7s | %(filename)s:%(lineno)d | %(name)s | %(message)s'

@@ -1,13 +1,13 @@
-'''
+"""
 Author: calm.wu wubo0067@hotmail.com
 Date: 2026-07-03 13:55:29
-LastEditors: calm.wu wubo0067@hotmail.com
-LastEditTime: 2026-09-12 13:37:18
-FilePath: server/server.py
+LastEditors: calm.wu
+LastEditTime: 2026-09-18 10:57:05
+FilePath: /Smart-Mistake-Lab/server/server.py
 Description: 主服务器入口，负责处理请求和响应。
 
 Copyright (c) 2026 by ${git_name_email}, All Rights Reserved.
-'''
+"""
 
 import os
 import json
@@ -23,10 +23,11 @@ from dotenv import load_dotenv
 # 加载项目根目录的 .env 文件
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 import db
 from log import logger
 from llm import (
@@ -182,7 +183,107 @@ def health():
     return {"status": "ok"}
 
 
+# --- 本机文件浏览（供前端「选择文件」控件使用）---
+
+# 浏览器出于安全限制拿不到 <input type="file"> 选中的绝对路径，而建库需要传给
+# sida-agent 一个服务端可读的绝对路径，因此由后端列出本机目录供用户逐级选择。
+# 仅返回名称 / 路径 / 大小，不读取文件内容。适用于本地或可信局域网部署。
+
+PDF_EXTENSIONS = {".pdf"}
+
+# 盘根常见系统目录，浏览时直接跳过
+_FS_SKIP_DIRS = {"$RECYCLE.BIN", "System Volume Information", "Config.Msi", "Recovery"}
+
+
+@app.get("/api/fs/roots")
+def fs_roots():
+    """可浏览的根位置：Windows 列出存在的盘符，其他系统为 `/` 与用户主目录。"""
+    roots = []
+    if os.name == "nt":
+        import string
+
+        for letter in string.ascii_uppercase:
+            drive = f"{letter}:\\"
+            if os.path.exists(drive):
+                roots.append({"name": drive, "path": drive, "kind": "drive"})
+    else:
+        roots.append({"name": "/", "path": "/", "kind": "drive"})
+
+    home = str(Path.home())
+    if home and not any(
+        r["path"].rstrip("\\/").lower() == home.rstrip("\\/").lower() for r in roots
+    ):
+        roots.insert(0, {"name": "主目录", "path": home, "kind": "home"})
+    return {"roots": roots}
+
+
+@app.get("/api/fs/list")
+def fs_list(path: str = Query("", description="绝对目录路径，留空则用用户主目录")):
+    """列出目录下的子目录与 PDF 文件（目录在前、文件在后）。"""
+    raw = (path or "").strip().strip('"').strip("'")
+    target = os.path.abspath(os.path.expanduser(raw)) if raw else str(Path.home())
+
+    # 传入的是文件（例如表单里已填好的 pdf 路径）时，回退到它所在目录
+    if not os.path.isdir(target):
+        parent_of_file = os.path.dirname(target)
+        if parent_of_file and os.path.isdir(parent_of_file):
+            target = parent_of_file
+        else:
+            raise HTTPException(status_code=400, detail=f"目录不存在：{target}")
+
+    try:
+        entries = sorted(os.listdir(target), key=lambda s: s.lower())
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"没有权限访问：{target}")
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"读取目录失败：{e}")
+
+    dirs, files = [], []
+    for entry in entries:
+        if entry.startswith(".") or entry in _FS_SKIP_DIRS:
+            continue
+        full = os.path.normpath(os.path.join(target, entry))
+        try:
+            if os.path.isdir(full):
+                dirs.append({"name": entry, "path": full})
+            elif os.path.splitext(entry)[1].lower() in PDF_EXTENSIONS:
+                files.append(
+                    {"name": entry, "path": full, "size": os.path.getsize(full)}
+                )
+        except OSError:
+            # 权限/失效软链等：跳过单个条目，不影响整目录浏览
+            continue
+
+    # 已位于根目录（如 D:\ 或 /）时 parent 返回空串，前端据此禁用「上级」
+    _, tail = os.path.splitdrive(target)
+    parent = os.path.dirname(target)
+    if not tail.strip("\\/") or os.path.normcase(parent) == os.path.normcase(target):
+        parent = ""
+    return {"path": target, "parent": parent, "dirs": dirs, "files": files}
+
+
 # --- Config ---
+
+# sida-agent HTTP API 服务（知识库）默认地址：见 sida-agent README 3.4
+SIDA_AGENT_DEFAULT_HOST = "127.0.0.1"
+SIDA_AGENT_DEFAULT_PORT = 6173
+
+
+def _sida_agent_base_url() -> str:
+    """从全局配置拼出 sida-agent 服务 base URL（每次实时读取，改配置即生效）。
+
+    host 字段允许直接填完整 URL（如 http://192.168.1.10:8000），此时忽略 port。"""
+    host = (
+        db.get_global_config_value("sida_agent_host") or SIDA_AGENT_DEFAULT_HOST
+    ).strip()
+    port_raw = (db.get_global_config_value("sida_agent_port") or "").strip()
+    try:
+        port = int(port_raw) if port_raw else SIDA_AGENT_DEFAULT_PORT
+    except ValueError:
+        port = SIDA_AGENT_DEFAULT_PORT
+    if host.startswith(("http://", "https://")):
+        return host.rstrip("/")
+    return f"http://{host.strip('/')}:{port}"
 
 
 @app.get("/api/students")
@@ -237,11 +338,18 @@ def get_config():
         "image_dir": db.get_config_value("image_dir") or "",
         "focus_timeout_hours": db.get_focus_timeout_hours(),
         "focus_max_per_subject": db.get_focus_max_per_subject(),
+        "sida_agent_host": db.get_global_config_value("sida_agent_host")
+        or SIDA_AGENT_DEFAULT_HOST,
+        "sida_agent_port": db.get_global_config_value("sida_agent_port")
+        or str(SIDA_AGENT_DEFAULT_PORT),
+        "chat_session_page_size": db.get_chat_session_page_size(),
     }
 
 
 @app.get("/api/token-stats")
-def token_stats(scope: str = Query("student", description="student=当前学生, all=全家合计")):
+def token_stats(
+    scope: str = Query("student", description="student=当前学生, all=全家合计")
+):
     """AI token 消耗统计：历史总量 + 当月每日消耗（仅保留当月明细）。
 
     scope=all 时返回全家合计 + 各学生分项。"""
@@ -288,6 +396,46 @@ def update_config(data: dict):
                 raise HTTPException(
                     status_code=400, detail="focus_max_per_subject 必须为有效数字"
                 )
+    if "sida_agent_host" in data:
+        val = (data["sida_agent_host"] or "").strip()
+        db.set_global_config_value("sida_agent_host", val or SIDA_AGENT_DEFAULT_HOST)
+        logger.info(f"sida-agent 服务地址已更新：host={val or SIDA_AGENT_DEFAULT_HOST}")
+    if "sida_agent_port" in data:
+        val = data["sida_agent_port"]
+        if val is not None and str(val).strip() != "":
+            try:
+                num = int(val)
+                if num < 1 or num > 65535:
+                    raise ValueError
+                db.set_global_config_value("sida_agent_port", str(num))
+                logger.info(f"sida-agent 服务端口已更新：{num}")
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400, detail="sida_agent_port 必须为 1-65535 的有效端口"
+                )
+        else:
+            db.set_global_config_value("sida_agent_port", str(SIDA_AGENT_DEFAULT_PORT))
+    if "chat_session_page_size" in data:
+        val = data["chat_session_page_size"]
+        if val is None or str(val).strip() == "":
+            db.set_global_config_value(
+                "chat_session_page_size", str(db.CHAT_SESSION_PAGE_SIZE_DEFAULT)
+            )
+        else:
+            try:
+                num = int(val)
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="chat_session_page_size 必须为 1-200 的有效整数",
+                )
+            if num < 1 or num > db.CHAT_SESSION_PAGE_SIZE_MAX:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"chat_session_page_size 必须在 1-{db.CHAT_SESSION_PAGE_SIZE_MAX} 之间",
+                )
+            db.set_global_config_value("chat_session_page_size", str(num))
+            logger.info(f"知识库会话列表每批条数已更新：{num}")
     return get_config()
 
 
@@ -550,23 +698,24 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             solution = {}
     solution_images = solution.get("images", []) if isinstance(solution, dict) else []
 
-    # 2. 组装待删除文件列表
-    files_to_delete: list[str] = [file_path]  # 原题图片
+    # 2. 组装待删除文件列表（统一解析为基于 image_dir 的绝对路径）
+    # 数据库中存的是相对路径（如 物理/xxx.jpg），必须先解析成绝对路径再删，
+    # 否则 os.path.isfile/os.remove 会按服务进程工作目录查找，文件被误判为
+    # "不存在"而跳过 → 磁盘文件残留 → 扫描页重新出现该题（bug 根因）。
+    resolved_main = resolve_image_path(file_path, image_dir)
+    if not resolved_main:
+        # 解析失败（image_dir 不存在等）：按原路径兜底，交给后面的存在性检查
+        resolved_main = os.path.normpath(file_path)
+    files_to_delete: list[str] = [resolved_main]  # 原题图片
     for img_name in solution_images:
         if img_name:
-            sol_path = os.path.join(os.path.dirname(file_path), img_name)
+            sol_path = os.path.join(os.path.dirname(resolved_main), img_name)
             files_to_delete.append(os.path.normpath(sol_path))
 
     # 3. 安全检查：所有待删除文件必须在 image_dir 下；不同盘符/挂载要直接拒绝，不抛 ValueError
     norm_image_dir = os.path.normpath(image_dir)
     for fp in files_to_delete:
-        normalized_fp = os.path.normpath(fp)
-        if not os.path.isabs(normalized_fp):
-            normalized_fp = os.path.normpath(
-                os.path.join(norm_image_dir, normalized_fp)
-            )
-
-        if not is_path_within_directory(normalized_fp, norm_image_dir):
+        if not is_path_within_directory(fp, norm_image_dir):
             raise HTTPException(
                 status_code=403,
                 detail=f"安全限制：不允许删除 image_dir 之外的路径：{fp}",
@@ -593,10 +742,10 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             logger.error(f"[purge] 删除文件失败：{fp}, 错误：{exc}")
 
     # 5. 只要有原题图片删除失败，就不删数据库记录
-    if file_path in failed:
+    if resolved_main in failed:
         raise HTTPException(
             status_code=500,
-            detail=f"原题图片删除失败：{file_path}，索引未删除。已删除：{deleted}, 失败：{failed}",
+            detail=f"原题图片删除失败：{resolved_main}，索引未删除。已删除：{deleted}, 失败：{failed}",
         )
 
     # 如果解答图片有删除失败，也不删数据库（保持完整性）
@@ -606,9 +755,11 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             detail=f"部分文件删除失败，索引未删除。已删除：{deleted}, 失败：{failed}",
         )
 
-    # 6. 删除数据库记录
+    # 6. 删除数据库记录（delete_image 内部会尝试相对/绝对多种路径写法匹配）
     db.delete_image(file_path)
-    logger.info(f"[purge] 彻底删除完成：{file_path}, 删除文件数：{len(deleted)}")
+    logger.info(
+        f"[purge] 彻底删除完成：{file_path} -> {resolved_main}, 删除文件数：{len(deleted)}"
+    )
 
     return {
         "status": "ok",
@@ -1087,6 +1238,262 @@ async def analyze(data: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# --- sida-agent 知识库代理（/api/agent/* → sida-agent HTTP API，见其 README 3.4） ---
+#
+# 前端统一走同源 /api/agent/*，本后端用 httpx 转发到配置的 sida-agent 服务。
+# 优点：host/port 存在本项目配置里、改配置即时生效、不依赖上游 CORS。
+# JSON 端点用普通转发；SSE 端点（chat 消息 / build 进度）用流式逐帧透传。
+# ============================================================================
+
+
+def _agent_unreachable_detail(base: str) -> str:
+    return f"无法连接 sida-agent 知识库服务（{base}）。请确认已启动：uv run python main.py --stage serve，或在「配置」页检查服务地址。"
+
+
+# sida-agent 是本机/局域网服务，必须直连，不能走系统代理：
+# Windows 开了系统代理（如 Clash 127.0.0.1:7892）时，httpx 默认 trust_env=True
+# 会经 urllib.getproxies() 读注册表代理，但 httpx 不解析注册表的
+# ProxyOverride（127.* 等本地地址例外），导致本机回环请求也被转发给代理，
+# 代理拒绝回环目标返回 502 → 前端所有 /api/agent/* 全部 502。
+# llm.py 的 AI 调用早已用 trust_env=False，这里保持一致。
+# （若未来 sida-agent 部署到需要代理才能到达的外网，再改为可配置。）
+def _agent_http_get(url: str, **kwargs) -> httpx.Response:
+    """对 sida-agent 的 GET 转发：禁用环境/系统代理。"""
+    return httpx.get(url, trust_env=False, **kwargs)
+
+
+def _agent_http_post(url: str, **kwargs) -> httpx.Response:
+    """对 sida-agent 的 POST 转发：禁用环境/系统代理。"""
+    return httpx.post(url, trust_env=False, **kwargs)
+
+
+@app.get("/api/agent/health")
+def agent_health():
+    """连通性测试：转发到 sida-agent /health。"""
+    base = _sida_agent_base_url()
+    try:
+        r = _agent_http_get(base + "/health", timeout=8.0)
+    except httpx.HTTPError as e:
+        logger.warning(f"[agent] health 连接失败：{e}")
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+def _safe_detail(r) -> object:
+    """尽量把上游错误响应转成可读 detail（保留 dict 结构，供前端展示 409 预估等）。"""
+    try:
+        j = r.json()
+        return j.get("detail", j) if isinstance(j, dict) else j
+    except Exception:
+        return (r.text or f"HTTP {r.status_code}")[:500]
+
+
+@app.get("/api/agent/books")
+def agent_books():
+    base = _sida_agent_base_url()
+    try:
+        r = _agent_http_get(base + "/books", timeout=30.0)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/chat/sessions")
+def agent_chat_sessions_list(
+    limit: int | None = Query(
+        None, ge=1, le=200, description="每批条数，缺省透传给上游（上游缺省=全部）"
+    ),
+    offset: int = Query(0, ge=0, description="起始偏移"),
+):
+    """会话列表代理：透传 limit/offset 到 sida-agent 的分页接口（见其 README 6.10）。
+
+    响应原样返回（含 total/count/limit/offset/has_more），不传参数时行为与旧版一致。"""
+    base = _sida_agent_base_url()
+    params = {}
+    if limit is not None:
+        params["limit"] = limit
+    if offset > 0:
+        params["offset"] = offset
+    try:
+        r = _agent_http_get(base + "/chat/sessions", params=params, timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.post("/api/agent/chat/sessions")
+async def agent_chat_sessions_create(request: Request):
+    base = _sida_agent_base_url()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        r = _agent_http_post(base + "/chat/sessions", json=body, timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/chat/sessions/{session_id}")
+def agent_chat_session_detail(session_id: str):
+    base = _sida_agent_base_url()
+    try:
+        r = _agent_http_get(base + f"/chat/sessions/{session_id}", timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.post("/api/agent/build/estimate")
+async def agent_build_estimate(request: Request):
+    base = _sida_agent_base_url()
+    body = await request.json()
+    if not (body.get("subject") or "").strip():
+        raise HTTPException(
+            status_code=400, detail="必须先选择学科（subject 不能为空）"
+        )
+    try:
+        r = _agent_http_post(base + "/build/estimate", json=body, timeout=60.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.post("/api/agent/build")
+async def agent_build_submit(request: Request):
+    base = _sida_agent_base_url()
+    body = await request.json()
+    if not (body.get("subject") or "").strip():
+        raise HTTPException(
+            status_code=400, detail="必须先选择学科（subject 不能为空）"
+        )
+    try:
+        r = _agent_http_post(base + "/build", json=body, timeout=60.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        # 409 等：detail 常为 dict（含 message/estimate/active_task_id），原样透传
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/build/tasks")
+def agent_build_tasks():
+    base = _sida_agent_base_url()
+    try:
+        r = _agent_http_get(base + "/build/tasks", timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+@app.get("/api/agent/build/tasks/{task_id}")
+def agent_build_task_status(task_id: str):
+    base = _sida_agent_base_url()
+    try:
+        r = _agent_http_get(base + f"/build/tasks/{task_id}", timeout=30.0)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=_safe_detail(r))
+    return r.json()
+
+
+# ---- SSE 透传端点 ----------------------------------------------------------
+
+
+@app.post("/api/agent/chat/sessions/{session_id}/messages")
+async def agent_chat_message_stream(session_id: str, request: Request):
+    """转发一轮对话并以 SSE 逐帧透传（token/reasoning/result/end）。"""
+    base = _sida_agent_base_url()
+    body = await request.json()
+    body["stream"] = True  # 强制走 SSE
+
+    async def event_stream():
+        try:
+            async with httpx.AsyncClient(timeout=None, trust_env=False) as client:
+                async with client.stream(
+                    "POST", base + f"/chat/sessions/{session_id}/messages", json=body
+                ) as upstream:
+                    if upstream.status_code >= 400:
+                        raw = await upstream.aread()
+                        err = {
+                            "type": "error",
+                            "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}",
+                        }
+                        yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+                        yield "event: end\ndata: {}\n\n"
+                        return
+                    # 用 aiter_bytes（已解压）而非 aiter_raw：避免透传 gzip 后丢失 Content-Encoding 头导致前端解不开
+                    async for chunk in upstream.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except httpx.HTTPError:
+            err = {"type": "error", "detail": _agent_unreachable_detail(base)}
+            yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+            yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/agent/build/tasks/{task_id}/events")
+async def agent_build_events_stream(task_id: str, since: int = Query(0, ge=0)):
+    """转发 build 进度 SSE（progress 帧 → 终态 task_status 帧）。"""
+    base = _sida_agent_base_url()
+
+    async def event_stream():
+        try:
+            async with httpx.AsyncClient(timeout=None, trust_env=False) as client:
+                async with client.stream(
+                    "GET",
+                    base + f"/build/tasks/{task_id}/events",
+                    params={"since": since},
+                ) as upstream:
+                    if upstream.status_code >= 400:
+                        raw = await upstream.aread()
+                        err = {
+                            "type": "error",
+                            "detail": f"上游返回 {upstream.status_code}：{raw.decode('utf-8', 'replace')[:300]}",
+                        }
+                        yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+                        yield "event: end\ndata: {}\n\n"
+                        return
+                    async for chunk in upstream.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except httpx.HTTPError:
+            # 处理上游连接错误
+            err = {"type": "error", "detail": _agent_unreachable_detail(base)}
+            yield "data: " + json.dumps(err, ensure_ascii=False) + "\n\n"
+            yield "event: end\ndata: {}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # --- Serve frontend static files (production build from dist/) ---
 # 必须在所有 API 路由之后挂载，避免覆盖 API
 dist_dir = Path(__file__).parent.parent / "dist"
@@ -1098,6 +1505,7 @@ else:
     logger.info("开发模式下请确保 Vite dev server (npm run dev) 正在运行")
 
 if __name__ == "__main__":
+    """启动服务器"""
     import uvicorn
 
     parser = argparse.ArgumentParser(description="Smart Mistake Lab Server")
