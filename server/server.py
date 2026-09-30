@@ -698,23 +698,24 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             solution = {}
     solution_images = solution.get("images", []) if isinstance(solution, dict) else []
 
-    # 2. 组装待删除文件列表
-    files_to_delete: list[str] = [file_path]  # 原题图片
+    # 2. 组装待删除文件列表（统一解析为基于 image_dir 的绝对路径）
+    # 数据库中存的是相对路径（如 物理/xxx.jpg），必须先解析成绝对路径再删，
+    # 否则 os.path.isfile/os.remove 会按服务进程工作目录查找，文件被误判为
+    # "不存在"而跳过 → 磁盘文件残留 → 扫描页重新出现该题（bug 根因）。
+    resolved_main = resolve_image_path(file_path, image_dir)
+    if not resolved_main:
+        # 解析失败（image_dir 不存在等）：按原路径兜底，交给后面的存在性检查
+        resolved_main = os.path.normpath(file_path)
+    files_to_delete: list[str] = [resolved_main]  # 原题图片
     for img_name in solution_images:
         if img_name:
-            sol_path = os.path.join(os.path.dirname(file_path), img_name)
+            sol_path = os.path.join(os.path.dirname(resolved_main), img_name)
             files_to_delete.append(os.path.normpath(sol_path))
 
     # 3. 安全检查：所有待删除文件必须在 image_dir 下；不同盘符/挂载要直接拒绝，不抛 ValueError
     norm_image_dir = os.path.normpath(image_dir)
     for fp in files_to_delete:
-        normalized_fp = os.path.normpath(fp)
-        if not os.path.isabs(normalized_fp):
-            normalized_fp = os.path.normpath(
-                os.path.join(norm_image_dir, normalized_fp)
-            )
-
-        if not is_path_within_directory(normalized_fp, norm_image_dir):
+        if not is_path_within_directory(fp, norm_image_dir):
             raise HTTPException(
                 status_code=403,
                 detail=f"安全限制：不允许删除 image_dir 之外的路径：{fp}",
@@ -741,10 +742,10 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             logger.error(f"[purge] 删除文件失败：{fp}, 错误：{exc}")
 
     # 5. 只要有原题图片删除失败，就不删数据库记录
-    if file_path in failed:
+    if resolved_main in failed:
         raise HTTPException(
             status_code=500,
-            detail=f"原题图片删除失败：{file_path}，索引未删除。已删除：{deleted}, 失败：{failed}",
+            detail=f"原题图片删除失败：{resolved_main}，索引未删除。已删除：{deleted}, 失败：{failed}",
         )
 
     # 如果解答图片有删除失败，也不删数据库（保持完整性）
@@ -754,9 +755,11 @@ def purge_image(file_path: str = Query(..., description="图片文件路径")):
             detail=f"部分文件删除失败，索引未删除。已删除：{deleted}, 失败：{failed}",
         )
 
-    # 6. 删除数据库记录
+    # 6. 删除数据库记录（delete_image 内部会尝试相对/绝对多种路径写法匹配）
     db.delete_image(file_path)
-    logger.info(f"[purge] 彻底删除完成：{file_path}, 删除文件数：{len(deleted)}")
+    logger.info(
+        f"[purge] 彻底删除完成：{file_path} -> {resolved_main}, 删除文件数：{len(deleted)}"
+    )
 
     return {
         "status": "ok",
@@ -1248,12 +1251,29 @@ def _agent_unreachable_detail(base: str) -> str:
     return f"无法连接 sida-agent 知识库服务（{base}）。请确认已启动：uv run python main.py --stage serve，或在「配置」页检查服务地址。"
 
 
+# sida-agent 是本机/局域网服务，必须直连，不能走系统代理：
+# Windows 开了系统代理（如 Clash 127.0.0.1:7892）时，httpx 默认 trust_env=True
+# 会经 urllib.getproxies() 读注册表代理，但 httpx 不解析注册表的
+# ProxyOverride（127.* 等本地地址例外），导致本机回环请求也被转发给代理，
+# 代理拒绝回环目标返回 502 → 前端所有 /api/agent/* 全部 502。
+# llm.py 的 AI 调用早已用 trust_env=False，这里保持一致。
+# （若未来 sida-agent 部署到需要代理才能到达的外网，再改为可配置。）
+def _agent_http_get(url: str, **kwargs) -> httpx.Response:
+    """对 sida-agent 的 GET 转发：禁用环境/系统代理。"""
+    return httpx.get(url, trust_env=False, **kwargs)
+
+
+def _agent_http_post(url: str, **kwargs) -> httpx.Response:
+    """对 sida-agent 的 POST 转发：禁用环境/系统代理。"""
+    return httpx.post(url, trust_env=False, **kwargs)
+
+
 @app.get("/api/agent/health")
 def agent_health():
     """连通性测试：转发到 sida-agent /health。"""
     base = _sida_agent_base_url()
     try:
-        r = httpx.get(base + "/health", timeout=8.0)
+        r = _agent_http_get(base + "/health", timeout=8.0)
     except httpx.HTTPError as e:
         logger.warning(f"[agent] health 连接失败：{e}")
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
@@ -1275,7 +1295,7 @@ def _safe_detail(r) -> object:
 def agent_books():
     base = _sida_agent_base_url()
     try:
-        r = httpx.get(base + "/books", timeout=30.0)
+        r = _agent_http_get(base + "/books", timeout=30.0)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1300,7 +1320,7 @@ def agent_chat_sessions_list(
     if offset > 0:
         params["offset"] = offset
     try:
-        r = httpx.get(base + "/chat/sessions", params=params, timeout=30.0)
+        r = _agent_http_get(base + "/chat/sessions", params=params, timeout=30.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1316,7 +1336,7 @@ async def agent_chat_sessions_create(request: Request):
     except Exception:
         body = {}
     try:
-        r = httpx.post(base + "/chat/sessions", json=body, timeout=30.0)
+        r = _agent_http_post(base + "/chat/sessions", json=body, timeout=30.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1328,7 +1348,7 @@ async def agent_chat_sessions_create(request: Request):
 def agent_chat_session_detail(session_id: str):
     base = _sida_agent_base_url()
     try:
-        r = httpx.get(base + f"/chat/sessions/{session_id}", timeout=30.0)
+        r = _agent_http_get(base + f"/chat/sessions/{session_id}", timeout=30.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1345,7 +1365,7 @@ async def agent_build_estimate(request: Request):
             status_code=400, detail="必须先选择学科（subject 不能为空）"
         )
     try:
-        r = httpx.post(base + "/build/estimate", json=body, timeout=60.0)
+        r = _agent_http_post(base + "/build/estimate", json=body, timeout=60.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1362,7 +1382,7 @@ async def agent_build_submit(request: Request):
             status_code=400, detail="必须先选择学科（subject 不能为空）"
         )
     try:
-        r = httpx.post(base + "/build", json=body, timeout=60.0)
+        r = _agent_http_post(base + "/build", json=body, timeout=60.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1375,7 +1395,7 @@ async def agent_build_submit(request: Request):
 def agent_build_tasks():
     base = _sida_agent_base_url()
     try:
-        r = httpx.get(base + "/build/tasks", timeout=30.0)
+        r = _agent_http_get(base + "/build/tasks", timeout=30.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1387,7 +1407,7 @@ def agent_build_tasks():
 def agent_build_task_status(task_id: str):
     base = _sida_agent_base_url()
     try:
-        r = httpx.get(base + f"/build/tasks/{task_id}", timeout=30.0)
+        r = _agent_http_get(base + f"/build/tasks/{task_id}", timeout=30.0)
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail=_agent_unreachable_detail(base))
     if r.status_code >= 400:
@@ -1407,7 +1427,7 @@ async def agent_chat_message_stream(session_id: str, request: Request):
 
     async def event_stream():
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
+            async with httpx.AsyncClient(timeout=None, trust_env=False) as client:
                 async with client.stream(
                     "POST", base + f"/chat/sessions/{session_id}/messages", json=body
                 ) as upstream:
@@ -1443,7 +1463,7 @@ async def agent_build_events_stream(task_id: str, since: int = Query(0, ge=0)):
 
     async def event_stream():
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
+            async with httpx.AsyncClient(timeout=None, trust_env=False) as client:
                 async with client.stream(
                     "GET",
                     base + f"/build/tasks/{task_id}/events",

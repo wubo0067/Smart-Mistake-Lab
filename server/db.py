@@ -944,8 +944,15 @@ def get_focus_timeout_hours() -> int:
 
 
 def delete_image(file_path: str):
+    """删除图片索引记录。
+
+    兼容多种路径写法：调用方可能传绝对路径（扫描页）或相对路径（错题库
+    详情页，数据库存储格式），逐一尝试匹配，确保记录一定被删掉。
+    否则索引残留 → 已删除文件的题仍出现在错题库列表中。"""
     conn = get_db()
-    conn.execute("DELETE FROM images WHERE file_path = ?", (file_path,))
+    candidates = _build_path_candidates(file_path)
+    for candidate in candidates:
+        conn.execute("DELETE FROM images WHERE file_path = ?", (candidate,))
     conn.commit()
     conn.close()
 
