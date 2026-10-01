@@ -3000,8 +3000,8 @@ function KbBuild({ health, healthLoading }) {
   const serviceDown = health && health.error;
   const [pdf, setPdf] = useState('');
   const [book, setBook] = useState('');
-  const [startPage, setStartPage] = useState('1');
-  const [endPage, setEndPage] = useState('12');
+  const [startPage, setStartPage] = useState('');   // 无默认页码：必须手动填写，防止沿用上一本教材的区间
+  const [endPage, setEndPage] = useState('');
   const [subject, setSubject] = useState('');   // 无默认学科：必须手动选择，防止导入学科出错
   const [maxNewCalls, setMaxNewCalls] = useState('');
   const [maxChunks, setMaxChunks] = useState('');
@@ -3040,6 +3040,15 @@ function KbBuild({ health, healthLoading }) {
     return p.split(/[\\/]/).filter(Boolean).pop().replace(/\.[^.]+$/, '');
   }
 
+  // 更换教材时重置依赖旧教材的字段：页数区间、学科、预估结果都必须重新填写/选择
+  function resetBookDependentFields() {
+    setStartPage('');
+    setEndPage('');
+    setSubject('');
+    setEstimate(null);
+    setError('');
+  }
+
   // 文件选择器回调：回填路径；显示名始终从全路径自动提取（覆盖旧值）
   function pickPdf(filePath) {
     setPdf(filePath);
@@ -3047,11 +3056,13 @@ function KbBuild({ health, healthLoading }) {
     bookTouched.current = false;
     const name = nameFromPath(filePath);
     if (name) setBook(name);
+    resetBookDependentFields();
   }
 
   // 手输/粘贴路径：未手动改过显示名时，同样自动从路径提取
   function onPdfChange(e) {
     const v = e.target.value;
+    if (v !== pdf) resetBookDependentFields();   // 路径一旦改动即视为换教材
     setPdf(v);
     if (!bookTouched.current && /\.pdf$/i.test(v.trim())) {
       const name = nameFromPath(v.trim());
@@ -3059,9 +3070,19 @@ function KbBuild({ health, healthLoading }) {
     }
   }
 
+  // 页码校验：必须填写且起始页不大于结束页
+  function validatePages() {
+    const s = parseInt(startPage, 10);
+    const e = parseInt(endPage, 10);
+    if (!s || s < 1 || !e || e < 1) { setError('请填写起始页和结束页'); return false; }
+    if (s > e) { setError('起始页不能大于结束页'); return false; }
+    return true;
+  }
+
   async function doEstimate() {
     if (!pdf.trim()) { setError('请先填写教材 PDF 路径'); return; }
     if (!subject) { setError('请先选择学科'); return; }
+    if (!validatePages()) return;
     setEstimating(true); setError(''); setEstimate(null);
     try { setEstimate(await AgentAPI.buildEstimate(buildPayload())); }
     catch (e) { setError(e.message || '预估失败'); }
@@ -3077,6 +3098,7 @@ function KbBuild({ health, healthLoading }) {
   async function doSubmit() {
     if (!pdf.trim()) { setError('请先填写教材 PDF 路径'); return; }
     if (!subject) { setError('请先选择学科后再确认导入'); return; }
+    if (!validatePages()) return;
     setSubmitting(true); setError(''); setNotice('');
     const res = await agentBuildSubmitRaw(buildPayload(true));
     setSubmitting(false);
@@ -3183,12 +3205,12 @@ function KbBuild({ health, healthLoading }) {
                 }} />
             </div>
             <div className="field">
-              <label className="field-label">起始页</label>
-              <input type="number" min={1} value={startPage} onChange={(e) => setStartPage(e.target.value)} />
+              <label className="field-label">起始页 <span style={{ color: '#e5484d' }}>*</span></label>
+              <input type="number" min={1} value={startPage} placeholder="必填" onChange={(e) => setStartPage(e.target.value)} />
             </div>
             <div className="field">
-              <label className="field-label">结束页</label>
-              <input type="number" min={1} value={endPage} onChange={(e) => setEndPage(e.target.value)} />
+              <label className="field-label">结束页 <span style={{ color: '#e5484d' }}>*</span></label>
+              <input type="number" min={1} value={endPage} placeholder="必填" onChange={(e) => setEndPage(e.target.value)} />
             </div>
             <div className="field">
               <label className="field-label">学科 <span style={{ color: '#e5484d' }}>*</span></label>
@@ -3216,14 +3238,14 @@ function KbBuild({ health, healthLoading }) {
           )}
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="kb-btn" onClick={doEstimate} disabled={estimating || submitting || !subject}>
+          <button className="kb-btn" onClick={doEstimate} disabled={estimating || submitting || !subject || !startPage || !endPage}>
             {estimating ? <Loader2 size={14} className="spin" /> : <Activity size={14} />} 规模预估
           </button>
-          <button className="kb-btn primary" onClick={doSubmit} disabled={submitting || estimating || !subject}
+          <button className="kb-btn primary" onClick={doSubmit} disabled={submitting || estimating || !subject || !startPage || !endPage}
             title={subject ? '' : '请先选择学科'}>
             {submitting ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} 确认导入
           </button>
-          {!subject && <span className="kb-field-hint">⚠ 请先选择学科，选择后才能确认导入</span>}
+          {(!subject || !startPage || !endPage) && <span className="kb-field-hint">⚠ 请先填写页数区间并选择学科，完成后才能预估/确认导入</span>}
         </div>
         {estimate && (
           <div className="kb-estimate">
