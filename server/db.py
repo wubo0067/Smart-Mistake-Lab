@@ -142,6 +142,9 @@ def create_student(name: str) -> dict:
             (name, "", _now()),
         )
         sid = cur.lastrowid
+        if sid is None:
+            conn.close()
+            raise ValueError("创建学生失败：未获取到学生 ID")
         db_file = f"data_s{sid}.db"
         conn.execute("UPDATE students SET db_file = ? WHERE id = ?", (db_file, sid))
         conn.commit()
@@ -150,7 +153,10 @@ def create_student(name: str) -> dict:
         raise ValueError("该学生名已存在")
     conn.close()
     init_db(os.path.join(DATA_DIR, db_file))
-    return get_student(sid)
+    student = get_student(sid)
+    if student is None:
+        raise ValueError("创建学生失败")
+    return student
 
 
 def rename_student(student_id: int, name: str) -> dict:
@@ -171,7 +177,10 @@ def rename_student(student_id: int, name: str) -> dict:
     conn.close()
     if not changed:
         raise ValueError("学生不存在")
-    return get_student(student_id)
+    student = get_student(student_id)
+    if student is None:
+        raise ValueError("学生不存在")
+    return student
 
 
 def delete_student(student_id: int) -> bool:
