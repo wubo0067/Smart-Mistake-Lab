@@ -701,8 +701,8 @@ def _model_context_tier(model: str, api_url: str) -> str:
       - DeepSeek：端点含 deepseek.com 或模型名含 deepseek。
       - Qwen：模型名解析出的版本号 >= 3（qwen3 / qwen3.5 / qwen3.6 等），
         或名称含 long / plus / max 等长上下文标记。
-    本地端点（Ollama / localhost）优先按 small 处理：本地部署的模型
-    上下文窗口通常较小且可配置，不适合注入超长知识点列表。
+    本地端点（Ollama / LM Studio / Atomic Chat 等回环地址）优先按 small 处理：本地
+    部署的模型上下文窗口通常较小且可配置，不适合注入超长知识点列表。
     其余（含未知模型）按 small 处理。
 
     Args:
@@ -717,7 +717,7 @@ def _model_context_tier(model: str, api_url: str) -> str:
     url = (api_url or "").lower()
 
     # 本地/Ollama 端点：无论模型名，一律按保守档处理
-    if not url or is_ollama_chat_endpoint(url) or is_probably_ollama_base_url(url):
+    if not url or is_ollama_chat_endpoint(url) or is_local_endpoint(url):
         return "small"
 
     # DeepSeek 官方或其推理模型具备长上下文支持
@@ -1114,12 +1114,95 @@ def is_deepseek_endpoint(api_url: str) -> bool:
     return "deepseek.com" in api_url.lower()
 
 
+# 端点协议标识：anthropic（/v1/messages）/ ollama（/api/chat）/ openai（/v1/chat/completions）
+PROTOCOL_ANTHROPIC = "anthropic"
+PROTOCOL_OLLAMA = "ollama"
+PROTOCOL_OPENAI = "openai"
+VALID_PROTOCOLS = (PROTOCOL_ANTHROPIC, PROTOCOL_OLLAMA, PROTOCOL_OPENAI)
+
+# 本机回环主机名（本地部署的 Ollama / LM Studio / Atomic Chat 等都会命中）
+_LOOPBACK_HOST_PATTERN = r"(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)"
+# 已知的本地 OpenAI 兼容服务默认端口（LM Studio 1234、Atomic Chat 1337）
+_KNOWN_OPENAI_LOCAL_PORTS = (1234, 1337)
+
+
+def is_local_endpoint(api_url: str) -> bool:
+    """判断 URL 是否指向本机回环地址（本地部署的模型服务）。"""
+    # 匹配 http(s)://localhost、127.0.0.1、::1、0.0.0.0 开头的地址（可带端口与子路径）
+    return bool(
+        re.match(
+            rf"^https?://{_LOOPBACK_HOST_PATTERN}(?::\d+)?(?:/|$)",
+            api_url.strip(),
+            re.IGNORECASE,
+        )
+    )
+
+
+def is_openai_base_url(api_url: str) -> bool:
+    """判断 URL 是否为已带版本号基础路径的 OpenAI 兼容 Base URL。
+
+    例如 http://127.0.0.1:1337/v1（Atomic Chat）或 http://127.0.0.1:1234/v1
+    （LM Studio）。这类地址只需再补 /chat/completions，不能重复追加 /v1，
+    否则会拼出 .../v1/v1/chat/completions 导致 404。
+    """
+    trimmed = api_url.strip()
+    # 形如 https://host/v1 或 https://host/proxy/v1（允许 /v1beta 之类版本后缀）
+    return bool(
+        re.match(r"^https?://[^/?#]+/v1(?:beta|alpha)?/?$", trimmed, re.IGNORECASE)
+        or re.match(
+            r"^https?://[^/?#]+(?:/[^/?#]+)+/v1(?:beta|alpha)?/?$",
+            trimmed,
+            re.IGNORECASE,
+        )
+    )
+
+
 def is_probably_ollama_base_url(api_url: str) -> bool:
     """判断 URL 是否像本地 Ollama 服务根地址（如 http://localhost:11434）。"""
-    # 匹配指向 localhost 或 127.0.0.1 且未携带子路径的根 URL
-    return bool(
-        re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?/?$", api_url.strip())
-    )
+    trimmed = api_url.strip()
+    # 匹配指向本机回环地址且未携带子路径的根 URL
+    if not re.match(
+        rf"^https?://{_LOOPBACK_HOST_PATTERN}(?::\d+)?/?$", trimmed, re.IGNORECASE
+    ):
+        return False
+    # 已知的本地 OpenAI 兼容服务端口（Atomic Chat 1337 / LM Studio 1234）不作 Ollama 处理
+    port_match = re.search(r":(\d+)", trimmed)
+    if port_match and int(port_match.group(1)) in _KNOWN_OPENAI_LOCAL_PORTS:
+        return False
+    return True
+
+
+def _protocol_override() -> str:
+    """读取 .env 中的 AI_PROTOCOL 显式协议覆盖项（auto/空 表示不覆盖）。"""
+    return os.getenv("AI_PROTOCOL", "").strip().lower()
+
+
+def detect_protocol(api_url: str) -> str:
+    """判定端点应采用的请求/响应协议，返回 anthropic / ollama / openai。
+
+    判定优先级（前者覆盖后者）：
+    1. URL 中显式携带的协议路径：/v1/messages、/api/chat、/chat/completions
+    2. AI_PROTOCOL 环境变量显式覆盖（auto 或空表示不干预）
+    3. 本机回环根地址（如 http://localhost:11434）默认按 Ollama 原生协议处理
+    4. 其余（含 http://127.0.0.1:1337/v1 这类本地 OpenAI 兼容服务）按 OpenAI 兼容处理
+    """
+    trimmed = (api_url or "").strip()
+    # 1. URL 已写明协议路径时以 URL 为准，避免 AI_PROTOCOL 误伤其他端点
+    if is_anthropic_endpoint(trimmed):
+        return PROTOCOL_ANTHROPIC
+    if is_ollama_chat_endpoint(trimmed):
+        return PROTOCOL_OLLAMA
+    if "/chat/completions" in trimmed:
+        return PROTOCOL_OPENAI
+    # 2. 显式协议覆盖只在 URL 语义不明（Base URL / 裸地址）时生效
+    override = _protocol_override()
+    if override in VALID_PROTOCOLS:
+        return override
+    # 3. 本地回环根地址默认 Ollama（保持对既有配置的兼容）
+    if is_probably_ollama_base_url(trimmed):
+        return PROTOCOL_OLLAMA
+    # 4. 默认 OpenAI 兼容
+    return PROTOCOL_OPENAI
 
 
 def normalize_api_url(api_url: str) -> str:
@@ -1128,30 +1211,44 @@ def normalize_api_url(api_url: str) -> str:
     归一化规则：
     - Anthropic 端点 (/v1/messages)：保持原样
     - 已包含 /v1/chat/completions 或 /api/chat：保持原样
-    - 本地 Ollama 根地址：自动补充 /api/chat 路径
-    - 其他 Base URL：自动补充 /v1/chat/completions 路径
+    - AI_PROTOCOL 显式指定协议时：按指定协议补全路径
+    - 本地 OpenAI 兼容 Base URL（如 http://127.0.0.1:1337/v1）：只补 /chat/completions
+    - 本地 Ollama 根地址（如 http://localhost:11434）：补 /api/chat
+    - 其他 Base URL：补 /v1/chat/completions
     """
     trimmed = api_url.strip()
     if not trimmed:
         return trimmed
+    base = trimmed.rstrip("/")
     # 若已经是完整的接口路径，则无需追加后缀
     if (
         is_anthropic_endpoint(trimmed)
-        or "/v1/chat/completions" in trimmed
         or is_ollama_chat_endpoint(trimmed)
+        or "/chat/completions" in trimmed
     ):
         return trimmed
+    # 显式协议覆盖优先于本地地址启发式判断
+    override = _protocol_override()
+    if override == PROTOCOL_OLLAMA:
+        return f"{base}/api/chat"
+    if override == PROTOCOL_ANTHROPIC:
+        return f"{base}/v1/messages"
+    # 已带 /v1 版本路径的 Base URL（Atomic Chat / LM Studio 等）只需补 /chat/completions
+    if is_openai_base_url(trimmed):
+        return f"{base}/chat/completions"
+    if override == PROTOCOL_OPENAI:
+        return f"{base}/v1/chat/completions"
     # 本地回环根地址默认识别为 Ollama，补全 /api/chat
     if is_probably_ollama_base_url(trimmed):
-        return f"{trimmed.rstrip('/')}/api/chat"
+        return f"{base}/api/chat"
     # 其他云端/代理根地址默认补全 OpenAI 兼容的 /v1/chat/completions
-    return f"{trimmed.rstrip('/')}/v1/chat/completions"
+    return f"{base}/v1/chat/completions"
 
 
 def should_require_api_key(api_url: str) -> bool:
     """判断该端点在发起请求前是否强制要求配置非空 API Key。"""
-    # Anthropic 端点强制校验 x-api-key，本地 Ollama 等可免 Key
-    return is_anthropic_endpoint(api_url)
+    # Anthropic 端点强制校验 x-api-key，本地 Ollama / OpenAI 兼容端点可免 Key
+    return detect_protocol(api_url) == PROTOCOL_ANTHROPIC
 
 
 # ============== 请求构建 ==============
@@ -1177,8 +1274,11 @@ def build_analyze_request(
     # 记录本次发送的完整 Prompt 以便调试排查
     logger.info(f"[LLM] 使用 Prompt: {prompt}")
 
+    # 协议判定：Anthropic / Ollama 原生 / OpenAI 兼容
+    protocol = detect_protocol(api_url)
+
     # 分支 1：Anthropic (/v1/messages) 协议格式
-    if is_anthropic_endpoint(api_url):
+    if protocol == PROTOCOL_ANTHROPIC:
         content_blocks: list[dict[str, Any]] = []
         # 若需要附带图片，按 Anthropic 规范构造 base64 image source 块
         if include_image and image_base64:
@@ -1218,7 +1318,7 @@ def build_analyze_request(
         }
 
     # 分支 2：Ollama 原生 (/api/chat) 协议格式
-    if is_ollama_chat_endpoint(api_url):
+    if protocol == PROTOCOL_OLLAMA:
         return {
             "headers": {"Content-Type": "application/json"},
             "body": {
@@ -1347,7 +1447,7 @@ def extract_usage_from_response(data: dict, api_url: str) -> dict:
             return 0
 
     # 1. Ollama 原生接口：字段位于顶层 prompt_eval_count 与 eval_count
-    if is_ollama_chat_endpoint(api_url):
+    if detect_protocol(api_url) == PROTOCOL_OLLAMA:
         prompt = _int(data.get("prompt_eval_count"))
         completion = _int(data.get("eval_count"))
         return {
@@ -1420,7 +1520,7 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
     reasoning_content 字段的情况提供尾部 JSON 抽取与兜底回退机制。
     """
     # 1. Anthropic 端点：响应格式为 {"content": [{"type": "text", "text": "..."}]}
-    if is_anthropic_endpoint(api_url):
+    if detect_protocol(api_url) == PROTOCOL_ANTHROPIC:
         # 遍历 content 数组，找到第一个 type 为 "text" 的内容块
         text_block = next(
             (
@@ -1434,7 +1534,7 @@ def extract_text_from_response(data: dict, api_url: str) -> str:
         return text_block["text"] if text_block else ""
 
     # 2. Ollama /api/chat 端点：响应格式为 {"message": {"content": "...", "thinking": "..."}}
-    if is_ollama_chat_endpoint(api_url):
+    if detect_protocol(api_url) == PROTOCOL_OLLAMA:
         message = data.get("message", {})
         content = message.get("content", "")
         thinking = message.get("thinking", "")
@@ -2171,7 +2271,7 @@ async def _generate_single_encouragement(
     }
 
     # Ollama 端点特殊参数注入（格式化为 json 并关闭推理）
-    if is_ollama_chat_endpoint(api_url):
+    if detect_protocol(api_url) == PROTOCOL_OLLAMA:
         body["think"] = False
         body["format"] = "json"
         body["options"] = {"num_predict": ai_config.max_tokens}

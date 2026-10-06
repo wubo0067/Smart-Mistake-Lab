@@ -183,7 +183,7 @@ sida-agent 把初中**物理 / 化学 / 数学**教材 / 讲义 PDF 用视觉大
 | AI 交互 | Python httpx（`server/llm.py`）                                 |
 | 日志    | Python logging + RotatingFileHandler（`server/log.py`）         |
 | 数据库   | SQLite（通过 Python sqlite3）                                     |
-| AI 接口 | 支持图片输入的 OpenAI Chat Completions / Anthropic Messages / Ollama |
+| AI 接口 | 支持图片输入的 OpenAI Chat Completions / Anthropic Messages / Ollama（含 Atomic Chat、LM Studio 等本地 OpenAI 兼容服务） |
 
 ## 🚀 快速开始
 
@@ -195,7 +195,7 @@ sida-agent 把初中**物理 / 化学 / 数学**教材 / 讲义 PDF 用视觉大
 | npm     | ≥ 9    | 前端包管理                             |
 | Python  | ≥ 3.10 | 后端服务（由 uv 自动管理）                   |
 | uv      | 最新     | Python 包管理器与虚拟环境管理（推荐）            |
-| AI 服务   | —      | OpenAI/Claude/Ollama 等支持图片输入的模型服务 |
+| AI 服务   | —      | OpenAI/Claude/Ollama/Atomic Chat 等支持图片输入的模型服务 |
 
 ### 安装 uv
 
@@ -438,6 +438,7 @@ PROBLEM_API_KEY=sk-your-problem-analysis-api-key
 | `PROBLEM_API_KEY`           | 视服务 |    —   | 解题分析 API Key（Ollama 可留空）                              |
 | `AI_TIMEOUT`                |  否  |  `120` | 单次 AI 请求超时（秒）                                         |
 | `AI_MAX_TOKENS`             |  否  | `4096` | 模型最大输出 token 数；若分析结果被截断（日志出现 `max_tokens` 截断提示），可调大此值 |
+| `AI_PROTOCOL`               |  否  | `auto` | 协议判定覆盖：`auto`/`openai`/`ollama`/`anthropic`。仅在地址语义不明时生效（见下方「支持的 AI 接口格式」） |
 
 职责说明：
 
@@ -498,15 +499,43 @@ AI_TIMEOUT=600
 AI_MAX_TOKENS=32768
 ```
 
+**Atomic Chat / LM Studio 等本地 OpenAI 兼容服务（无需 API Key）**：
+
+这类服务虽然是本机地址，但走的是 OpenAI 兼容协议（Base URL 形如 `http://127.0.0.1:1337/v1`），
+不是 Ollama 原生协议，填写时请**保留 `/v1` 后缀**：
+
+```env
+# Atomic Chat 本地服务（默认端口 1337）
+IMAGE_ANALYSIS_AI_API_URL=http://127.0.0.1:1337/v1
+IMAGE_ANALYSIS_AI_MODEL=qwen3.8:27b
+
+PROBLEM_AI_API_URL=http://127.0.0.1:1337/v1
+PROBLEM_API_MODEL=deepseek-r1:7b
+
+# 请求超时（秒），本地模型处理图片可能较慢
+AI_TIMEOUT=600
+AI_MAX_TOKENS=32768
+```
+
+> 如果只填写不带 `/v1` 的裸地址（如 `http://127.0.0.1:1337`），或服务使用了其他端口，
+> 可通过 `AI_PROTOCOL=openai` 显式指定协议，程序会按 OpenAI 兼容格式补全 `/v1/chat/completions`。
+
 ### 支持的 AI 接口格式
 
 | 格式                               | 鉴权方式                              | 适用服务                                     |
 | -------------------------------- | --------------------------------- | ---------------------------------------- |
-| OpenAI 兼容 `/v1/chat/completions` | `Authorization: Bearer`           | 支持图片输入的 OpenAI 兼容模型服务                    |
+| OpenAI 兼容 `/v1/chat/completions` | `Authorization: Bearer`（可留空）      | 支持图片输入的 OpenAI 兼容模型服务，含 Atomic Chat / LM Studio 等本地服务 |
 | Anthropic `/v1/messages`         | `x-api-key` + `anthropic-version` | 支持图片输入的 Claude 模型服务                      |
 | Ollama `/api/chat`               | 无                                 | 本地 Ollama 服务（如 `http://localhost:11434`） |
 
-程序会根据接口 URL 自动判断请求格式。如果直接填写 Ollama 的基础地址（如 `http://localhost:11434`），程序会自动补全为 `/api/chat`。
+程序会根据接口 URL 自动判断请求格式，规则如下（命中即止）：
+
+1. URL 中显式写出接口路径：`/v1/messages` → Anthropic；`/api/chat` → Ollama；`/chat/completions` → OpenAI 兼容。
+2. `AI_PROTOCOL` 环境变量显式指定（`openai` / `ollama` / `anthropic`）时，按指定协议补全路径；`auto`（默认）表示不干预。
+3. 本机回环地址且未带子路径（如 `http://localhost:11434`）→ 识别为 Ollama，自动补全 `/api/chat`；
+   但 `http://127.0.0.1:1337`（Atomic Chat）与 `http://127.0.0.1:1234`（LM Studio）默认按 OpenAI 兼容处理。
+4. 其余 Base URL → OpenAI 兼容，自动补全 `/v1/chat/completions`。若填写的是已带 `/v1` 的 Base URL
+   （如 `http://127.0.0.1:1337/v1`），只补 `/chat/completions`，不会出现 `/v1/v1/...` 的重复路径。
 
 ## 项目结构
 
