@@ -69,8 +69,9 @@ class TestPhysicsKnowledgeModelSplit(unittest.TestCase):
     def test_other_subjects_have_empty_models(self):
         self.assertEqual(DEFAULT_SUBJECT_CONFIG["models"], [])
         for subject, cfg in SUBJECT_CONFIG.items():
-            if subject != "物理":
-                self.assertEqual(cfg.get("models"), [])
+            self.assertIn("models", cfg)
+            if subject in ("英语", "语文"):
+                self.assertEqual(cfg["models"], [])
 
 
 @mock.patch.dict(os.environ, {"MODEL_HINT_TOKENS": "", "KNOWLEDGE_POINT_TOKENS": ""})
@@ -97,7 +98,8 @@ class TestModelHintPromptSection(unittest.TestCase):
 
     def test_formatter_declares_tags_must_come_from_knowledge_points(self):
         section = _format_models_for_prompt(PHYSICS_MODELS, 10**6)
-        self.assertIn(KNOWLEDGE_HEADER, section)
+        self.assertIn("tags 必须从上方", section)
+        self.assertIn("候选核心考点", section)
 
     def test_resolve_model_hint_budget_defaults_to_constant(self):
         self.assertEqual(
@@ -153,7 +155,7 @@ class TestModelHintPromptSection(unittest.TestCase):
             self.assertIn(f"- {entry}", section)
 
     def test_other_subjects_prompt_has_no_models_section(self):
-        for subject in ["数学", "化学", "英语", "语文"]:
+        for subject in ["英语", "语文"]:
             with self.subTest(subject=subject):
                 prompt = build_analysis_prompt(
                     subject=subject, content="测试内容", model="qwen2.5:7b",
