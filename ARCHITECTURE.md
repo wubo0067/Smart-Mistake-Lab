@@ -83,7 +83,7 @@ graph TD
     - **数据模型**: 管理 `images` (题目元数据)、`practice_log` (时间线日志)、`ai_token_usage` (Token 统计) 及 `config` (学生配置)。
 - **`llm.py` (AI Engine)**:
     - **多模态处理**: 使用视觉模型进行图片 OCR 提取；使用文本模型进行解题思路（Summary）与知识点（Tags）生成。
-    - **提示词工程**: 维护复杂的系统 Prompt，包括学科知识点库，用于控制 AI 的回答质量与格式。
+    - **提示词工程**: 维护复杂的系统 Prompt，包括学科知识点库与解题模型库，用于控制 AI 的回答质量与格式。
     - **响应解析**: 具备强大的 JSON 提取能力，能从包含推理过程（Reasoning）的响应中精准定位结构化数据。
 - **`similar.py` (Similarity Engine)**:
     - **两级检索架构**: 
@@ -113,5 +113,6 @@ graph TD
 
 - **多租户隔离设计**: 采用“一学生一库”策略而非“单表标识”策略。这不仅保证了数据的物理隔离与安全性，还极大降低了单库数据量过大导致的性能下降，并方便用户进行数据备份与迁移。
 - **非对称相似度算法**: 在 `similar.py` 中，针对“短查询匹配长文档”的场景，采用了 `containment`（包含度）权重更高的非对称评分模型，解决了传统 Jaccard 算法在片段查询时分数被过度稀释的问题。
-- **Token 预算管理**: 针对不同上下文窗口能力的模型（如本地服务与云端 DeepSeek），系统实现了动态的知识点注入策略（`resolve_knowledge_point_token_budget`），在保证知识覆盖度的同时防止 Prompt 溢出。
+- **Token 预算管理**: 针对不同上下文窗口能力的模型（如本地服务与云端 DeepSeek），系统实现了动态的知识点注入策略（`resolve_knowledge_point_token_budget`）与独立的解题模型注入策略（`resolve_model_hint_token_budget`，可用 `.env` 的 `MODEL_HINT_TOKENS` 覆盖），在保证知识覆盖度的同时防止 Prompt 溢出。
+- **考点库与模型库分离**: 各学科的“候选核心考点”只保留标准考点名称（用于 `tags` 输出与标签映射 `_map_tags_to_knowledge_points`）；口诀、解题模型与易错提醒归入独立的 `PHYSICS_MODELS` 列表，由 `_format_models_for_prompt` 渲染成独立段落（【常用解题模型与易错提醒】）注入 Prompt，仅引导推理、明确禁止作为 `tags` 输出，避免长口诀污染标签匹配。
 - **混合式 Prompt 策略**: 在 AI 分析中结合了“视觉提取”与“文本推理”两阶段任务，通过将 OCR 结果与解题模型分离，大幅提升了复杂几何/物理题目的解析准确率。
