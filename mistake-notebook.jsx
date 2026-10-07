@@ -425,6 +425,7 @@ const CSS = `
   --accent: #E3B341;
   --accent-2: #4C9A8E;
   --accent-2-deep: #3E7F74;
+  --accent-2-ink: #1F5F54;
   --card: #FFFFFF;
   --shadow: rgba(37, 54, 84, 0.10);
   font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
@@ -459,19 +460,25 @@ const CSS = `
   background: var(--paper);
   box-shadow: inset 0 1px 3px rgba(37,54,84,0.35), 0 0 0 1px var(--grid);
 }
-.mnb .shell { max-width: 1600px; margin: 0 auto; padding-left: 40px; }
+.mnb .shell {
+  max-width: 1600px; margin: 0 auto; padding-left: 40px;
+  /* flex 骨架：让错题库面板自动占满视口剩余高度，替代魔法数 calc(100vh-170px) */
+  display: flex; flex-direction: column;
+  min-height: calc(100vh - 88px);
+}
 .mnb .margin-rule {
   position: absolute; left: 56px; top: 0; bottom: 0;
   width: 2px; background: var(--margin); opacity: 0.55;
 }
 .mnb .header {
   display: flex; align-items: baseline; justify-content: space-between;
-  flex-wrap: wrap; gap: 12px; margin-bottom: 22px;
+  flex-wrap: wrap; gap: 12px; margin-bottom: 16px;
 }
 .mnb h1 {
   font-family: "Songti SC", "STSong", "Noto Serif SC", serif;
-  font-size: 30px; font-weight: 700; margin: 0; letter-spacing: 1px;
+  font-size: 30px; font-weight: 900; margin: 0; letter-spacing: 1px;
   position: relative; display: inline-block;
+  color: var(--accent-2-ink);
 }
 .mnb h1 .hl { background: linear-gradient(transparent 60%, var(--accent) 60%); padding: 0 2px; }
 .mnb .subtitle { color: var(--ink-soft); font-size: 13px; margin-top: 4px; }
@@ -535,19 +542,35 @@ const CSS = `
   transition: all .12s ease;
 }
 .mnb .student-switch-manage:hover { background: var(--paper); color: var(--accent-2); }
-.mnb .tabs { display: flex; gap: 6px; }
+/* tabs 独立成行：紧贴面板顶边框，保留"书签咬合"隐喻 */
+.mnb .tabs-row { display: flex; margin-bottom: 0; }
+.mnb .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .mnb .tab-btn {
   font-family: "Songti SC", "STSong", serif;
   font-size: 14px; padding: 9px 18px; border-radius: 8px 8px 0 0;
   border: 1.5px solid var(--ink); border-bottom: none;
-  background: var(--paper); color: var(--ink-soft); cursor: pointer;
+  background: var(--paper); color: var(--tab-color, var(--accent-2-ink)); font-weight: 700; cursor: pointer;
   position: relative; top: 1.5px; transition: all .15s ease;
 }
+/* 每页一个主题色：文字着色 + 标签顶部彩条（激活时彩条加深加高） */
+.mnb .tab-btn::before {
+  content: ""; position: absolute; left: -1.5px; right: -1.5px; top: -1.5px; height: 3px;
+  border-radius: 8px 8px 0 0; background: var(--tab-color, var(--accent-2-ink));
+  opacity: 0.45; transition: all .15s ease;
+}
+.mnb .tab-btn.tab-scan { --tab-color: #1F5F54; }
+.mnb .tab-btn.tab-library { --tab-color: #C74B4B; }
+.mnb .tab-btn.tab-focus { --tab-color: #B84A7F; }
+.mnb .tab-btn.tab-timeline { --tab-color: #2E6DB4; }
+.mnb .tab-btn.tab-knowledge { --tab-color: #6B4E9B; }
+.mnb .tab-btn.tab-config { --tab-color: #4A5361; }
 .mnb .tab-btn.active {
-  background: var(--card); color: var(--ink); font-weight: 700;
+  background: var(--card); color: var(--tab-color, var(--accent-2-ink)); font-weight: 800;
   box-shadow: 0 -2px 8px var(--shadow);
 }
-.mnb .tab-btn:not(.active):hover { color: var(--ink); }
+.mnb .tab-btn.active::before { opacity: 1; height: 4px; }
+.mnb .tab-btn:not(.active):hover { background: rgba(255, 255, 255, 0.65); }
+.mnb .tab-btn:not(.active):hover::before { opacity: 0.8; }
 .mnb .panel {
   background: var(--card); border: 1.5px solid var(--ink);
   border-radius: 0 10px 10px 10px; padding: 24px;
@@ -559,7 +582,8 @@ const CSS = `
 }
 .mnb .config-title {
   font-family: "Songti SC", "STSong", serif;
-  font-size: 16px; font-weight: 700; margin: 0 0 6px;
+  font-size: 16px; font-weight: 800; margin: 0 0 6px;
+  color: var(--accent-2-ink);
 }
 .mnb .config-hint {
   color: var(--ink-soft); font-size: 12.5px; line-height: 1.6; margin: 0 0 12px;
@@ -600,7 +624,7 @@ const CSS = `
 .mnb .student-row.current { border-color: var(--accent); background: rgba(255, 236, 179, 0.35); }
 .mnb .mini-btn {
   display: inline-flex; align-items: center; gap: 3px;
-  font-size: 12px; padding: 4px 9px; border-radius: 6px;
+  font-size: 12px; padding: 6px 10px; border-radius: 6px;
   border: 1.5px solid var(--ink); background: var(--card); color: var(--ink);
   cursor: pointer; transition: all .12s ease;
 }
@@ -706,8 +730,9 @@ const CSS = `
 }
 .mnb .section-title {
   font-family: "Songti SC", "STSong", serif;
-  font-size: 16px; font-weight: 700; margin: 0 0 12px;
+  font-size: 16px; font-weight: 800; margin: 0 0 12px;
   display: flex; align-items: center; gap: 8px;
+  color: var(--accent-2-ink);
 }
 .mnb .section-title .badge {
   font-size: 12px; background: var(--margin); color: #fff;
@@ -742,12 +767,16 @@ const CSS = `
 .mnb .scan-card .info .status.indexed { color: var(--accent-2); }
 .mnb .scan-card-delete-btn {
   position: absolute; top: 4px; right: 4px; z-index: 5;
-  width: 24px; height: 24px; border-radius: 50%;
+  width: 28px; height: 28px; border-radius: 50%;
   border: none; background: rgba(199,75,75,0.78); color: #fff;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; padding: 0; opacity: 0; transition: opacity .15s;
 }
 .mnb .scan-card:hover .scan-card-delete-btn { opacity: 1; }
+/* 触屏设备无 hover，删除按钮常显 */
+@media (hover: none) {
+  .mnb .scan-card-delete-btn { opacity: 1; }
+}
 .mnb .scan-card-delete-btn:hover { background: var(--margin); }
 .mnb .scan-preview-close {
   position: absolute; top: 14px; right: 14px;
@@ -772,7 +801,7 @@ const CSS = `
   flex-shrink: 0; white-space: nowrap;
 }
 .mnb .subject-page-title {
-  margin: 0; font-size: 20px; font-weight: 800; color: var(--ink);
+  margin: 0; font-size: 20px; font-weight: 900; color: var(--accent-2-ink);
 }
 .mnb .subject-page-stats {
   font-size: 13px; color: var(--ink-soft); font-weight: 500;
@@ -780,13 +809,13 @@ const CSS = `
 .mnb .subject-filtered-hint { color: var(--margin); font-weight: 600; }
 
 /* Library */
-/* 错题库面板：占满视口剩余高度，仅卡片列表内部滚动，
+/* 错题库面板：占满视口剩余高度（由 .shell flex 骨架分配），仅卡片列表内部滚动，
    错题本标题、学科标题、学科标签行、搜索栏保持静态 */
 .mnb .panel.library-panel {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 170px);
-  max-height: calc(100vh - 170px);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
 }
 .mnb .library-panel .subject-page-header { flex-shrink: 0; }
@@ -1234,7 +1263,7 @@ const CSS = `
 }
 .mnb .solution-img-delete {
   position: absolute; top: 2px; right: 2px;
-  width: 20px; height: 20px; border-radius: 50%;
+  width: 28px; height: 28px; border-radius: 50%;
   border: none; background: rgba(199,75,75,0.85); color: #fff;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; font-size: 10px; padding: 0;
@@ -1284,7 +1313,7 @@ const CSS = `
 }
 .mnb .focus-subject-label {
   font-family: "Songti SC", "STSong", serif;
-  font-size: 18px; font-weight: 800; color: var(--accent-2);
+  font-size: 18px; font-weight: 900; color: var(--accent-2-ink);
   letter-spacing: 0.5px;
   padding: 2px 10px 2px 0;
 }
@@ -1350,11 +1379,11 @@ const CSS = `
 .mnb .date-section-header {
   display: flex; align-items: baseline; gap: 10px;
   padding: 6px 0 10px; margin-bottom: 6px;
-  border-bottom: 2px solid #7C3AED;
+  border-bottom: 2px solid var(--accent-2);
 }
 .mnb .date-section-label {
   font-family: "Songti SC", "STSong", serif;
-  font-size: 18px; font-weight: 800; color: #7C3AED;
+  font-size: 18px; font-weight: 900; color: var(--accent-2-ink);
   letter-spacing: 0.5px;
   padding: 2px 10px 2px 0;
 }
@@ -1384,7 +1413,8 @@ const CSS = `
 /* responsive: sidebar collapses on narrow screens */
 @media (max-width: 860px) {
   /* 窄屏下恢复页面整体滚动，避免面板内容被截断 */
-  .mnb .panel.library-panel { height: auto; max-height: none; overflow: visible; }
+  .mnb .shell { min-height: 0; }
+  .mnb .panel.library-panel { flex: 0 0 auto; min-height: 0; height: auto; max-height: none; overflow: visible; }
   .mnb .library-layout { flex-direction: column; align-items: flex-start; }
   .mnb .tag-sidebar { flex: none; width: 100%; max-height: none; position: static; }
   .mnb .tag-sidebar-list { flex-direction: row; flex-wrap: wrap; gap: 6px; }
@@ -1421,9 +1451,9 @@ const CSS = `
 
 .mnb .focus-page-title {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 900;
   margin: 0 0 6px;
-  color: var(--ink);
+  color: var(--accent-2-ink);
 }
 
 .mnb .focus-page-desc {
@@ -1567,8 +1597,8 @@ const CSS = `
 .mnb .timeline-day-date {
   font-family: "Songti SC", "STSong", serif;
   font-size: 16px;
-  font-weight: 700;
-  color: var(--ink);
+  font-weight: 800;
+  color: var(--accent-2-ink);
 }
 .mnb .timeline-day-weekday {
   font-size: 12px;
@@ -1803,7 +1833,7 @@ const CSS = `
 .mnb .kb-toolbar {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px;
 }
-.mnb .kb-toolbar-title { font-size: 14px; font-weight: 700; color: var(--ink); }
+.mnb .kb-toolbar-title { font-size: 14px; font-weight: 800; color: var(--accent-2-ink); }
 .mnb .kb-btn {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 7px 13px; border-radius: 8px; cursor: pointer;
@@ -3481,6 +3511,8 @@ export default function App() {
   const [detailSaving, setDetailSaving] = useState(false);
   const [detailError, setDetailError] = useState(null);
   const [detailDirty, setDetailDirty] = useState(false);
+  // 关闭详情弹窗时的应用内二次确认（替代 window.confirm）
+  const [confirmDiscardClose, setConfirmDiscardClose] = useState(false);
   // 详情页 AI 重新分析
   const [detailAnalyzing, setDetailAnalyzing] = useState(false);
   const [detailAnalyzeMsg, setDetailAnalyzeMsg] = useState(null);
@@ -4289,6 +4321,7 @@ export default function App() {
     setDetailTagInput('');
     setDetailError(null);
     setDetailDirty(false);
+    setConfirmDiscardClose(false);
     setDetailAnalyzing(false);
     setDetailAnalyzeMsg(null);
     setDetailUserPrompt('');
@@ -4355,14 +4388,14 @@ export default function App() {
 
   function closeDetailModal() {
     if (detailSaving) return;
-    if (detailDirty) {
-      const shouldDiscard = window.confirm('当前有未保存修改，确认关闭并放弃这些修改吗？');
-      if (!shouldDiscard) {
-        setDetailError('你取消了关闭，当前修改仍未保存');
-        return;
-      }
+    if (detailDirty && !confirmDiscardClose) {
+      // 在弹窗内显示应用内确认条，而不是打断式的 window.confirm
+      setDetailError(null);
+      setConfirmDiscardClose(true);
+      return;
     }
     setDetailError(null);
+    setConfirmDiscardClose(false);
     // 关闭详情：让尚未返回的 AI 分析结果作废，避免串到下一道打开的题目
     activeDetailPathRef.current = null;
     detailAnalyzeSeqRef.current += 1;
@@ -4372,6 +4405,11 @@ export default function App() {
     if (detailSourceRef.current === 'similar' && similarResult && !similarBusy) {
       setSimilarOpen(true);
     }
+  }
+
+  function cancelDiscardClose() {
+    setConfirmDiscardClose(false);
+    setDetailError('已保留当前修改，可继续编辑或点击“保存”');
   }
 
   // --- 找相似题 ---
@@ -4538,6 +4576,7 @@ export default function App() {
         ),
       })));
       setDetailDirty(false);
+      setConfirmDiscardClose(false);
       setDetailAnalyzeMsg(null);
     } catch (e) {
       console.error('update failed', e);
@@ -4878,31 +4917,33 @@ export default function App() {
             <StudentSwitcher students={students} currentStudentId={currentStudentId}
               onSwitch={switchStudent} onManage={() => setTab('config')} />
           )}
+        </div>
+        <div className="tabs-row">
           <div className="tabs">
-            <button className={'tab-btn' + (tab === 'scan' ? ' active' : '')} onClick={() => setTab('scan')}
+            <button className={'tab-btn tab-scan' + (tab === 'scan' ? ' active' : '')} onClick={() => setTab('scan')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，可放心切换其它页面' : undefined}>
               <FolderOpen size={14} style={{ marginRight: 4, verticalAlign: -2 }} />扫描
               {analyzing && <span className="tab-analyzing-dot" title="AI 分析中" />}
             </button>
-            <button className={'tab-btn' + (tab === 'library' ? ' active' : '')} onClick={() => setTab('library')}
+            <button className={'tab-btn tab-library' + (tab === 'library' ? ' active' : '')} onClick={() => setTab('library')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，去错题库编辑不会中断分析' : undefined}>
               <BookOpen size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
               错题库 {totalIndexedCount > 0 ? `(${totalIndexedCount})` : ''}
             </button>
-            <button className={'tab-btn' + (tab === 'focus' ? ' active' : '')} onClick={() => switchToFocus()}
+            <button className={'tab-btn tab-focus' + (tab === 'focus' ? ' active' : '')} onClick={() => switchToFocus()}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <Target size={14} style={{ marginRight: 4, verticalAlign: -2 }} />
               重点练{/* 重点练数量只在当前 tab 显示，但计数在加载后可获取 */}
             </button>
-            <button className={'tab-btn' + (tab === 'timeline' ? ' active' : '')} onClick={() => setTab('timeline')}
+            <button className={'tab-btn tab-timeline' + (tab === 'timeline' ? ' active' : '')} onClick={() => setTab('timeline')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <History size={14} style={{ marginRight: 4, verticalAlign: -2 }} />时间线
             </button>
-            <button className={'tab-btn' + (tab === 'knowledge' ? ' active' : '')} onClick={() => setTab('knowledge')}
+            <button className={'tab-btn tab-knowledge' + (tab === 'knowledge' ? ' active' : '')} onClick={() => setTab('knowledge')}
               title="sida-agent 知识库：教材 / 对话 / 导入">
               <Sparkles size={14} style={{ marginRight: 4, verticalAlign: -2 }} />知识库
             </button>
-            <button className={'tab-btn' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}
+            <button className={'tab-btn tab-config' + (tab === 'config' ? ' active' : '')} onClick={() => setTab('config')}
               title={analyzing ? 'AI 分析进行中，结果将保留在扫描页，切换页面不会中断分析' : undefined}>
               <Settings size={14} style={{ marginRight: 4, verticalAlign: -2 }} />配置&统计
             </button>
@@ -5655,174 +5696,184 @@ export default function App() {
                 </div>
                 <div className="detail-content">
 
-              {/* 可编辑标题 */}
-              {editingTitle ? (
-                <div className="field" style={{ marginBottom: 10 }}>
-                  <input type="text" value={editTitleValue}
-                    onChange={(e) => setEditTitleValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') saveDetailTitle();
-                      if (e.key === 'Escape') { setEditTitleValue(detail.title || ''); setEditingTitle(false); }
-                    }}
-                    onBlur={saveDetailTitle}
-                    autoFocus
-                    style={{ fontSize: 19, fontWeight: 700, fontFamily: '"Songti SC", "STSong", serif' }} />
-                </div>
-              ) : (
-                <h2 onClick={() => { setEditingTitle(true); setEditTitleValue(detail.title || ''); }}
-                  style={{ cursor: 'pointer' }} title="点击编辑标题">
-                  {detail.title || '未命名题目'} <Edit3 size={13} style={{ opacity: 0.4, verticalAlign: 'middle' }} />
-                </h2>
-              )}
+                  {/* 可编辑标题 */}
+                  {editingTitle ? (
+                    <div className="field" style={{ marginBottom: 10 }}>
+                      <input type="text" value={editTitleValue}
+                        onChange={(e) => setEditTitleValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveDetailTitle();
+                          if (e.key === 'Escape') { setEditTitleValue(detail.title || ''); setEditingTitle(false); }
+                        }}
+                        onBlur={saveDetailTitle}
+                        autoFocus
+                        style={{ fontSize: 19, fontWeight: 700, fontFamily: '"Songti SC", "STSong", serif' }} />
+                    </div>
+                  ) : (
+                    <h2 onClick={() => { setEditingTitle(true); setEditTitleValue(detail.title || ''); }}
+                      style={{ cursor: 'pointer' }} title="点击编辑标题">
+                      {detail.title || '未命名题目'} <Edit3 size={13} style={{ opacity: 0.4, verticalAlign: 'middle' }} />
+                    </h2>
+                  )}
 
-              {detail.summary ? (
-                <div className="summary">
-                  <span className="ai-badge">AI 思路</span>
-                  {detail.summary}
-                </div>
-              ) : (
-                <div className="summary" style={{ color: 'var(--pencil)', opacity: 0.8 }}>
-                  暂无 AI 解题思路，可在下方点击「AI 重新分析」生成
-                </div>
-              )}
+                  {detail.summary ? (
+                    <div className="summary">
+                      <span className="ai-badge">AI 思路</span>
+                      {detail.summary}
+                    </div>
+                  ) : (
+                    <div className="summary" style={{ color: 'var(--pencil)', opacity: 0.8 }}>
+                      暂无 AI 解题思路，可在下方点击「AI 重新分析」生成
+                    </div>
+                  )}
 
-              <div className="field" style={{ marginBottom: 14 }}>
-                <label className="field-label">AI 提取题目内容</label>
-                <textarea rows={6} value={detailContent}
-                  onChange={(e) => { setDetailContent(e.target.value); detailContentRef.current = e.target.value; }}
-                  onBlur={saveDetailContent}
-                  placeholder="AI 从图片中提取的题目内容，可手动修正" />
-              </div>
+                  <div className="field" style={{ marginBottom: 14 }}>
+                    <label className="field-label">AI 提取题目内容</label>
+                    <textarea rows={6} value={detailContent}
+                      onChange={(e) => { setDetailContent(e.target.value); detailContentRef.current = e.target.value; }}
+                      onBlur={saveDetailContent}
+                      placeholder="AI 从图片中提取的题目内容，可手动修正" />
+                  </div>
 
-              {/* 时间信息 */}
-              <div className="timestamp-row">
-                {detail.created_at && (
-                  <span className="timestamp">📅 添加于 {formatTime(detail.created_at)}</span>
-                )}
-                {detail.last_practiced_at && (
-                  <span className="timestamp">🕐 最近练习 {formatTime(detail.last_practiced_at)}</span>
-                )}
-              </div>
+                  {/* 时间信息 */}
+                  <div className="timestamp-row">
+                    {detail.created_at && (
+                      <span className="timestamp">📅 添加于 {formatTime(detail.created_at)}</span>
+                    )}
+                    {detail.last_practiced_at && (
+                      <span className="timestamp">🕐 最近练习 {formatTime(detail.last_practiced_at)}</span>
+                    )}
+                  </div>
 
-              <div className="field solution-section">
-                <label className="field-label">解答</label>
-                <textarea
-                  ref={solutionTextareaRef}
-                  rows={5}
-                  value={solutionText}
-                  onChange={(e) => { setSolutionText(e.target.value); solutionTextRef.current = e.target.value; setDetailDirty(true); }}
-                  onBlur={saveSolutionText}
-                  onPaste={handleSolutionPaste}
-                  placeholder="输入解题思路，或直接在这里粘贴截图…"
-                />
-                {solutionImages.length > 0 && (
-                  <div className="solution-images">
-                    {solutionImages.map((filename) => (
-                      <div key={filename} className="solution-img-wrapper">
-                        <img src={API.imageUrl(getSolutionFullPath(filename))} alt={filename}
-                          onDoubleClick={() => setPreviewSolutionImage(getSolutionFullPath(filename))}
-                          title="双击查看原图" />
-                        <button className="solution-img-delete"
-                          onClick={(e) => { e.stopPropagation(); deleteSolutionImage(filename); }}
-                          title="删除解答图片">
-                          <X size={10} />
-                        </button>
+                  <div className="field solution-section">
+                    <label className="field-label">解答</label>
+                    <textarea
+                      ref={solutionTextareaRef}
+                      rows={5}
+                      value={solutionText}
+                      onChange={(e) => { setSolutionText(e.target.value); solutionTextRef.current = e.target.value; setDetailDirty(true); }}
+                      onBlur={saveSolutionText}
+                      onPaste={handleSolutionPaste}
+                      placeholder="输入解题思路，或直接在这里粘贴截图…"
+                    />
+                    {solutionImages.length > 0 && (
+                      <div className="solution-images">
+                        {solutionImages.map((filename) => (
+                          <div key={filename} className="solution-img-wrapper">
+                            <img src={API.imageUrl(getSolutionFullPath(filename))} alt={filename}
+                              onDoubleClick={() => setPreviewSolutionImage(getSolutionFullPath(filename))}
+                              title="双击查看原图" />
+                            <button className="solution-img-delete"
+                              onClick={(e) => { e.stopPropagation(); deleteSolutionImage(filename); }}
+                              title="删除解答图片">
+                              <X size={10} />
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+                    <input type="file" accept="image/*" ref={solutionFileInputRef}
+                      onChange={handleSolutionFileSelect} style={{ display: 'none' }} />
+                    <button className="solution-add-btn"
+                      onClick={() => solutionFileInputRef.current?.click()}>
+                      <Plus size={13} /> 添加图片
+                    </button>
                   </div>
-                )}
-                <input type="file" accept="image/*" ref={solutionFileInputRef}
-                  onChange={handleSolutionFileSelect} style={{ display: 'none' }} />
-                <button className="solution-add-btn"
-                  onClick={() => solutionFileInputRef.current?.click()}>
-                  <Plus size={13} /> 添加图片
-                </button>
-              </div>
 
-              {/* 掌握程度 + 练习计数 */}
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-                <div className="field" style={{ flex: '1 1 200px', marginBottom: 0 }}>
-                  <label className="field-label">掌握程度</label>
-                  <div className="mastery-group">
-                    {['mastered', 'unfamiliar', 'practice'].map((val) => (
-                      <label key={val} className={'mastery-option' + (detailMastery === val ? ' active' : '')}>
-                        <input type="radio" name="mastery" value={val}
-                          checked={detailMastery === val}
-                          onChange={() => saveDetailMastery(val)} />
-                        <span className="mastery-light"
-                          style={{ width: 11, height: 11, background: MASTERY_META[val].color }} />
-                        <span>{MASTERY_META[val].label}</span>
-                      </label>
-                    ))}
+                  {/* 掌握程度 + 练习计数 */}
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+                    <div className="field" style={{ flex: '1 1 200px', marginBottom: 0 }}>
+                      <label className="field-label">掌握程度</label>
+                      <div className="mastery-group">
+                        {['mastered', 'unfamiliar', 'practice'].map((val) => (
+                          <label key={val} className={'mastery-option' + (detailMastery === val ? ' active' : '')}>
+                            <input type="radio" name="mastery" value={val}
+                              checked={detailMastery === val}
+                              onChange={() => saveDetailMastery(val)} />
+                            <span className="mastery-light"
+                              style={{ width: 11, height: 11, background: MASTERY_META[val].color }} />
+                            <span>{MASTERY_META[val].label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label className="field-label">难度评分</label>
+                      <StarRating value={detailDifficulty} onChange={setDetailDifficulty} />
+                    </div>
+                    <div className="field" style={{ flex: '0 0 auto', marginBottom: 0, textAlign: 'center' }}>
+                      <label className="field-label">练习次数</label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className="practice-count">{detailPracticeCount}</span>
+                        <button className="practice-btn" onClick={incrementPractice} title="练习 +1">+1</button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="field">
-                  <label className="field-label">难度评分</label>
-                  <StarRating value={detailDifficulty} onChange={setDetailDifficulty} />
-                </div>
-                <div className="field" style={{ flex: '0 0 auto', marginBottom: 0, textAlign: 'center' }}>
-                  <label className="field-label">练习次数</label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="practice-count">{detailPracticeCount}</span>
-                    <button className="practice-btn" onClick={incrementPractice} title="练习 +1">+1</button>
+
+                  {detailError && <div className="save-msg error" style={{ marginTop: -10, marginBottom: 12 }}>{detailError}</div>}
+                  {detailSaving && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>保存中…</div>}
+                  {detailAnalyzeMsg && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>{detailAnalyzeMsg}</div>}
+
+                  {confirmDiscardClose && (
+                    <div className="confirm-bar" role="alertdialog" aria-label="确认放弃未保存的修改">
+                      <span>当前有未保存的修改，关闭后将丢失。确定要放弃并关闭吗？</span>
+                      <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8 }}>
+                        <button className="mini-btn" onClick={cancelDiscardClose}>继续编辑</button>
+                        <button className="mini-btn danger" onClick={() => { setConfirmDiscardClose(false); closeDetailModal(); }}>放弃并关闭</button>
+                      </span>
+                    </div>
+                  )}
+
+                  {/* AI 重新分析的自定义提示：让用户指定解题方向/知识范围 */}
+                  <div className="reanalyze-prompt">
+                    <button type="button" className={'reanalyze-prompt-toggle' + (detailPromptOpen ? ' open' : '')}
+                      onClick={() => setDetailPromptOpen((v) => !v)}
+                      title="填写后，AI 重新分析会优先按你指定的方向/知识范围解题">
+                      <Target size={13} />
+                      AI 分析方向提示（可选）
+                      <ChevronDown size={13} className="reanalyze-prompt-chevron" />
+                    </button>
+                    {detailPromptOpen && (
+                      <textarea rows={3} value={detailUserPrompt}
+                        onChange={(e) => setDetailUserPrompt(e.target.value)}
+                        placeholder="告诉 AI 你的解题方向或知识范围，例如：我还没学动能定理，请用受力分析和牛顿第二定律的方法讲解；或：请用初中方法解答…"
+                        style={{ marginTop: 8 }} />
+                    )}
                   </div>
-                </div>
-              </div>
 
-              {detailError && <div className="save-msg error" style={{ marginTop: -10, marginBottom: 12 }}>{detailError}</div>}
-              {detailSaving && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>保存中…</div>}
-              {detailAnalyzeMsg && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>{detailAnalyzeMsg}</div>}
-
-              {/* AI 重新分析的自定义提示：让用户指定解题方向/知识范围 */}
-              <div className="reanalyze-prompt">
-                <button type="button" className={'reanalyze-prompt-toggle' + (detailPromptOpen ? ' open' : '')}
-                  onClick={() => setDetailPromptOpen((v) => !v)}
-                  title="填写后，AI 重新分析会优先按你指定的方向/知识范围解题">
-                  <Target size={13} />
-                  AI 分析方向提示（可选）
-                  <ChevronDown size={13} className="reanalyze-prompt-chevron" />
-                </button>
-                {detailPromptOpen && (
-                  <textarea rows={3} value={detailUserPrompt}
-                    onChange={(e) => setDetailUserPrompt(e.target.value)}
-                    placeholder="告诉 AI 你的解题方向或知识范围，例如：我还没学动能定理，请用受力分析和牛顿第二定律的方法讲解；或：请用初中方法解答…"
-                    style={{ marginTop: 8 }} />
-                )}
-              </div>
-
-              <div className="modal-actions">
-                <button className="save-btn" style={{ marginTop: 0 }} onClick={saveDetail} disabled={detailSaving || !detailDirty}>
-                  {detailSaving ? '保存中…' : '保存修改'}
-                </button>
-                <button className="save-btn secondary" style={{ marginTop: 0 }}
-                  onClick={reanalyzeDetail} disabled={detailAnalyzing || detailSaving}
-                  title="调用 AI 重新识别题目，标签将与已有标签合并，解题思路将被更新">
-                  {detailAnalyzing ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
-                  {detailAnalyzing ? 'AI 分析中…' : 'AI 重新分析'}
-                </button>
-                <button className="save-btn secondary similar-detail-btn" style={{ marginTop: 0 }}
-                  onClick={openSimilarFromDetail} disabled={detailSaving}
-                  title="根据当前题目的题干和知识点，在错题库中查找相同 / 变体 / 类似的题（自动排除本题）">
-                  🔍 找相似
-                </button>
-                <button className={'focus-btn' + (detail.is_focus_practice === 1 ? ' active' : '')}
-                  style={{ marginTop: 0 }}
-                  onClick={async () => {
-                    const isFocus = detail.is_focus_practice === 1;
-                    try {
-                      await toggleFocusPractice(detail.file_path, !isFocus);
-                    } catch (e) {
-                      // 错误已由 toggleFocusPractice 设置到 focusError
-                    }
-                  }}
-                  title={detail.is_focus_practice === 1 ? '取消重点练标识' : `将该题加入重点练（每学科最多 ${focusMaxPerSubject} 道）`}>
-                  {detail.is_focus_practice === 1 ? '⭐ 取消重点练' : '⚡ 设为重点练'}
-                </button>
-                <button className="del-btn" onClick={openDeleteConfirm}>
-                  <Trash2 size={14} /> 删除
-                </button>
-              </div>
-              {focusError && <div className="save-msg error" style={{ marginTop: 8 }}>{focusError}</div>}
+                  <div className="modal-actions">
+                    <button className="save-btn" style={{ marginTop: 0 }} onClick={saveDetail} disabled={detailSaving || !detailDirty}>
+                      {detailSaving ? '保存中…' : '保存修改'}
+                    </button>
+                    <button className="save-btn secondary" style={{ marginTop: 0 }}
+                      onClick={reanalyzeDetail} disabled={detailAnalyzing || detailSaving}
+                      title="调用 AI 重新识别题目，标签将与已有标签合并，解题思路将被更新">
+                      {detailAnalyzing ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+                      {detailAnalyzing ? 'AI 分析中…' : 'AI 重新分析'}
+                    </button>
+                    <button className="save-btn secondary similar-detail-btn" style={{ marginTop: 0 }}
+                      onClick={openSimilarFromDetail} disabled={detailSaving}
+                      title="根据当前题目的题干和知识点，在错题库中查找相同 / 变体 / 类似的题（自动排除本题）">
+                      🔍 找相似
+                    </button>
+                    <button className={'focus-btn' + (detail.is_focus_practice === 1 ? ' active' : '')}
+                      style={{ marginTop: 0 }}
+                      onClick={async () => {
+                        const isFocus = detail.is_focus_practice === 1;
+                        try {
+                          await toggleFocusPractice(detail.file_path, !isFocus);
+                        } catch (e) {
+                          // 错误已由 toggleFocusPractice 设置到 focusError
+                        }
+                      }}
+                      title={detail.is_focus_practice === 1 ? '取消重点练标识' : `将该题加入重点练（每学科最多 ${focusMaxPerSubject} 道）`}>
+                      {detail.is_focus_practice === 1 ? '⭐ 取消重点练' : '⚡ 设为重点练'}
+                    </button>
+                    <button className="del-btn" onClick={openDeleteConfirm}>
+                      <Trash2 size={14} /> 删除
+                    </button>
+                  </div>
+                  {focusError && <div className="save-msg error" style={{ marginTop: 8 }}>{focusError}</div>}
                 </div>
               </div>
             </div>
