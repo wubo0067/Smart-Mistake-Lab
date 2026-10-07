@@ -3523,17 +3523,17 @@ export default function App() {
   const [detailAnalyzing, setDetailAnalyzing] = useState(false);
   const [detailAnalyzeMsg, setDetailAnalyzeMsg] = useState(null);
   // 详情页 AI 重新分析的自定义提示（用户可指定解题方向/知识范围）
-  const [detailUserPrompt, setDetailUserPrompt] = useState('');
+  // 用 ref 而非 state：受控 textarea 会让每次敲字触发整个 App 重渲染，导致弹窗抖动
+  const detailUserPromptRef = useRef('');
   const [detailPromptOpen, setDetailPromptOpen] = useState(false);
   const titleSavingRef = useRef(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState('');
-  const [detailContent, setDetailContent] = useState('');
   const detailContentRef = useRef('');
+  const detailContentTextareaRef = useRef(null);
   const [detailMastery, setDetailMastery] = useState('');
   const [detailDifficulty, setDetailDifficulty] = useState(3);
   const [detailPracticeCount, setDetailPracticeCount] = useState(0);
-  const [solutionText, setSolutionText] = useState('');
   const solutionTextRef = useRef('');
   const [solutionImages, setSolutionImages] = useState([]);
   const solutionImagesRef = useRef([]);
@@ -4330,16 +4330,14 @@ export default function App() {
     setConfirmDiscardClose(false);
     setDetailAnalyzing(false);
     setDetailAnalyzeMsg(null);
-    setDetailUserPrompt('');
+    detailUserPromptRef.current = '';
     setDetailPromptOpen(false);
     setEditingTitle(false);
     setEditTitleValue(p.title || '');
-    setDetailContent(p.content || '');
     detailContentRef.current = p.content || '';
     setDetailMastery(p.mastery || 'unfamiliar');
     setDetailDifficulty(typeof p.difficulty === 'number' ? p.difficulty : 3);
     setDetailPracticeCount(p.practice_count || 0);
-    setSolutionText(sol.text || '');
     solutionTextRef.current = sol.text || '';
     setSolutionImages(Array.isArray(sol.images) ? sol.images : []);
     solutionImagesRef.current = Array.isArray(sol.images) ? sol.images : [];
@@ -4615,7 +4613,7 @@ export default function App() {
   // --- AI 重新分析（详情弹窗） ---
   async function reanalyzeDetail() {
     if (!detail || detailAnalyzing) return;
-    const prompt = (detailUserPrompt || '').trim();
+    const prompt = (detailUserPromptRef.current || '').trim();
     // 上一次 AI 生成的解题思路（若有），让 AI 在既有思路基础上修正/深化
     const prevSummary = (detail.summary || '').trim();
     // 记录本次请求对应的题目与请求序号。
@@ -4708,8 +4706,8 @@ export default function App() {
           setDetail((prev) => (prev && prev.file_path === analyzedPath ? { ...prev, ...patch } : prev));
           if (activeDetailPathRef.current === analyzedPath) {
             const finalContent = newContent || snapshot.existingContent;
-            setDetailContent(finalContent);
             detailContentRef.current = finalContent;
+            if (detailContentTextareaRef.current) detailContentTextareaRef.current.value = finalContent;
           }
           showAutoSaveToast('✅ AI 分析已完成，结果已自动保存到对应错题');
         } catch (e) {
@@ -4722,8 +4720,8 @@ export default function App() {
       // ===== 前台：题目仍是当前打开的这道题 → 填充草稿，等用户保存 =====
       // 题目内容（content）：更新到「题目内容」编辑框中
       if (newContent) {
-        setDetailContent(newContent);
         detailContentRef.current = newContent;
+        if (detailContentTextareaRef.current) detailContentTextareaRef.current.value = newContent;
       }
       // 合并标签：保留已有标签，仅把 AI 新识别出的标签追加进去（不覆盖、不重复）
       setDetail((prev) => {
@@ -5735,8 +5733,10 @@ export default function App() {
 
                   <div className="field" style={{ marginBottom: 14 }}>
                     <label className="field-label">AI 提取题目内容</label>
-                    <textarea rows={6} value={detailContent}
-                      onChange={(e) => { setDetailContent(e.target.value); detailContentRef.current = e.target.value; }}
+                    {/* 非受控：值存在 ref，打字不触发 App 重渲染（防抖动）；key 按题重挂载以载入新题内容 */}
+                    <textarea key={`content-${detail.file_path}`} ref={detailContentTextareaRef} rows={6}
+                      defaultValue={detailContentRef.current}
+                      onChange={(e) => { detailContentRef.current = e.target.value; }}
                       onBlur={saveDetailContent}
                       placeholder="AI 从图片中提取的题目内容，可手动修正" />
                   </div>
@@ -5754,10 +5754,11 @@ export default function App() {
                   <div className="field solution-section">
                     <label className="field-label">解答</label>
                     <textarea
+                      key={`solution-${detail.file_path}`}
                       ref={solutionTextareaRef}
                       rows={5}
-                      value={solutionText}
-                      onChange={(e) => { setSolutionText(e.target.value); solutionTextRef.current = e.target.value; setDetailDirty(true); }}
+                      defaultValue={solutionTextRef.current}
+                      onChange={(e) => { solutionTextRef.current = e.target.value; setDetailDirty(true); }}
                       onBlur={saveSolutionText}
                       onPaste={handleSolutionPaste}
                       placeholder="输入解题思路，或直接在这里粘贴截图…"
@@ -5840,8 +5841,10 @@ export default function App() {
                       <ChevronDown size={13} className="reanalyze-prompt-chevron" />
                     </button>
                     {detailPromptOpen && (
-                      <textarea rows={3} value={detailUserPrompt}
-                        onChange={(e) => setDetailUserPrompt(e.target.value)}
+                      // 非受控 textarea：输入只写 ref，不触发 React 重渲染（防抖动）；
+                      // 折叠再展开时通过 defaultValue 恢复已输入内容
+                      <textarea rows={3} defaultValue={detailUserPromptRef.current}
+                        onChange={(e) => { detailUserPromptRef.current = e.target.value; }}
                         placeholder="告诉 AI 你的解题方向或知识范围，例如：我还没学动能定理，请用受力分析和牛顿第二定律的方法讲解；或：请用初中方法解答…"
                         style={{ marginTop: 8 }} />
                     )}
