@@ -967,6 +967,10 @@ const CSS = `
   background: var(--card); border: 1.5px solid var(--ink); border-radius: 10px;
   max-width: 820px; width: 100%; max-height: 88vh; overflow-y: auto;
   padding: 28px; position: relative;
+  /* 预留滚动条槽位：滚动条出现/消失不再改变内容宽度（防横向跳动）；
+     阻止滚动链把外层页面/弹窗一起滚动（防纵向窜动） */
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .mnb .modal-close {
   position: absolute; top: 14px; right: 14px;
@@ -1006,6 +1010,8 @@ const CSS = `
   max-height: 78vh;
   overflow-y: auto;
   padding-right: 8px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .mnb .detail-tags { margin-top: 12px; }
 .mnb .detail-tags .tag-row { min-width: 0; align-items: flex-start; }
