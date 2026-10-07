@@ -421,9 +421,10 @@ const CSS = `
   --margin: #C74B4B;
   --ink: #253654;
   --ink-soft: #57648A;
-  --pencil: #9098A6;
+  --pencil: #6B7484;
   --accent: #E3B341;
   --accent-2: #4C9A8E;
+  --accent-2-deep: #3E7F74;
   --card: #FFFFFF;
   --shadow: rgba(37, 54, 84, 0.10);
   font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
@@ -438,6 +439,17 @@ const CSS = `
   box-sizing: border-box;
 }
 .mnb *, .mnb *::before, .mnb *::after { box-sizing: border-box; }
+.mnb button:focus-visible, .mnb input:focus-visible, .mnb select:focus-visible,
+.mnb textarea:focus-visible, .mnb [tabindex]:focus-visible {
+  outline: 2px solid var(--accent-2); outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mnb *, .mnb *::before, .mnb *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
 .mnb .holes {
   position: absolute; left: 22px; top: 90px;
   display: flex; flex-direction: column; gap: 46px;
@@ -568,7 +580,7 @@ const CSS = `
 .mnb .field { margin-bottom: 16px; }
 .mnb .save-btn {
   margin-top: 18px; padding: 10px 22px; border-radius: 7px;
-  border: 1.5px solid var(--accent-2); background: var(--accent-2);
+  border: 1.5px solid var(--accent-2-deep); background: var(--accent-2-deep);
   color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
 }
 .mnb .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -857,7 +869,7 @@ const CSS = `
 }
 .mnb .card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
 .mnb .card-tags span {
-  font-size: 10.5px; font-family: ui-monospace, monospace;
+  font-size: 12px; font-family: ui-monospace, monospace;
   background: #FFF6E0; border: 1px solid var(--accent); color: #6B5314;
   border-radius: 999px; padding: 2px 7px;
 }
@@ -869,7 +881,7 @@ const CSS = `
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; font-weight: 700; color: var(--ink);
 }
-.mnb .card-practice { font-size: 10.5px; color: var(--ink-soft); }
+.mnb .card-practice { font-size: 12px; color: var(--ink-soft); }
 
 /* Star Rating */
 .mnb .star-rating { display: inline-flex; gap: 2px; align-items: center; vertical-align: middle; }
@@ -932,6 +944,7 @@ const CSS = `
   width: 30px; height: 30px; border-radius: 50%;
   border: 1.5px solid var(--ink); background: var(--paper);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
+  font: inherit; padding: 0; color: var(--ink);
 }
 .mnb .modal img {
   width: 100%; border-radius: 8px; border: 1.5px solid var(--grid); margin-bottom: 14px;
@@ -1044,7 +1057,8 @@ const CSS = `
   font-family: ui-monospace, "SF Mono", Consolas, monospace;
   margin-left: auto; white-space: nowrap;
 }
-@media (max-width: 860px) {
+/* 弹窗宽度 min(94vw,1400px) + overlay padding 20px：视口 < 1560px 时外侧箭头必然被裁剪，统一内置 */
+@media (max-width: 1560px) {
   .mnb .detail-nav-btn.left { left: 6px; }
   .mnb .detail-nav-btn.right { right: 6px; }
   .mnb .detail-nav-btn { width: 36px; height: 36px; }
@@ -1095,7 +1109,7 @@ const CSS = `
   max-width: 55vw;
 }
 .mnb .zoom-preview-handle-hint {
-  margin-left: auto; font-size: 11px; color: var(--pencil); white-space: nowrap;
+  margin-left: auto; font-size: 12px; color: var(--pencil); white-space: nowrap;
 }
 .mnb .zoom-preview-scroll {
   overflow: auto;
@@ -1194,7 +1208,7 @@ const CSS = `
 }
 .mnb .practice-btn {
   padding: 8px 14px; border-radius: 7px;
-  border: 1.5px solid var(--accent-2); background: var(--accent-2);
+  border: 1.5px solid var(--accent-2-deep); background: var(--accent-2-deep);
   color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
   transition: opacity .15s;
 }
@@ -1350,7 +1364,7 @@ const CSS = `
   border: 1px solid var(--grid);
 }
 .mnb .sidebar-tag-count {
-  font-size: 11px; color: var(--pencil); font-weight: 400; margin-left: 6px; flex-shrink: 0;
+  font-size: 12px; color: var(--pencil); font-weight: 400; margin-left: 6px; flex-shrink: 0;
 }
 .mnb .tag-sidebar-empty {
   font-size: 12.5px; color: var(--pencil); text-align: center; padding: 20px 0;
@@ -1425,15 +1439,15 @@ const CSS = `
   gap: 2px;
   flex-shrink: 0;
   padding: 8px 14px;
-  background: var(--bg-3);
+  background: #FFF6E0;
   border-radius: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
 }
 
 .mnb .focus-count-num {
   font-size: 26px;
   font-weight: 800;
-  color: var(--accent-1);
+  color: #B45309;
   line-height: 1;
 }
 .mnb .focus-count-unit {
@@ -1447,9 +1461,9 @@ const CSS = `
   align-items: center;
   gap: 4px;
   padding: 5px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--grid);
   border-radius: 6px;
-  background: var(--bg-2);
+  background: var(--paper);
   color: var(--ink);
   font-size: 12.5px;
   cursor: pointer;
@@ -1618,7 +1632,7 @@ const CSS = `
   cursor: pointer; white-space: nowrap; transition: all .12s;
   font-family: inherit;
 }
-.mnb .similar-open-btn:hover { background: var(--accent-2); color: #fff; }
+.mnb .similar-open-btn:hover { background: var(--accent-2-deep); color: #fff; }
 .mnb .similar-open-btn:active { transform: translateY(1px); }
 
 .mnb .similar-modal-overlay { z-index: 58; }
@@ -1705,7 +1719,7 @@ const CSS = `
   color: var(--ink);
 }
 .mnb .similar-item-title .similar-rank {
-  font-size: 11px; color: var(--pencil);
+  font-size: 12px; color: var(--pencil);
   font-family: ui-monospace, "SF Mono", Consolas, monospace; font-weight: 600;
 }
 .mnb .similar-item-title .similar-score {
@@ -1713,11 +1727,11 @@ const CSS = `
 }
 .mnb .similar-item-tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .mnb .similar-subject-chip {
-  font-size: 10.5px; font-weight: 700; background: var(--ink); color: var(--paper);
+  font-size: 12px; font-weight: 700; background: var(--ink); color: var(--paper);
   border-radius: 999px; padding: 2px 8px;
 }
 .mnb .similar-tag-chip {
-  font-size: 10.5px; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px; font-family: ui-monospace, "SF Mono", Consolas, monospace;
   background: #FFF6E0; border: 1px solid var(--accent); color: #6B5314;
   border-radius: 999px; padding: 2px 7px;
 }
@@ -1798,8 +1812,8 @@ const CSS = `
 }
 .mnb .kb-btn:hover:not(:disabled) { background: var(--ink); color: #fff; }
 .mnb .kb-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.mnb .kb-btn.primary { border-color: var(--accent-2); background: var(--accent-2); color: #fff; }
-.mnb .kb-btn.primary:hover:not(:disabled) { filter: brightness(0.94); background: var(--accent-2); color: #fff; }
+.mnb .kb-btn.primary { border-color: var(--accent-2-deep); background: var(--accent-2-deep); color: #fff; }
+.mnb .kb-btn.primary:hover:not(:disabled) { filter: brightness(0.94); background: var(--accent-2-deep); color: #fff; }
 .mnb .kb-btn.stop { border-color: var(--margin); color: var(--margin); }
 .mnb .kb-btn.stop:hover:not(:disabled) { background: var(--margin); color: #fff; }
 .mnb .kb-link-btn {
@@ -1826,7 +1840,7 @@ const CSS = `
 .mnb .kb-session-item:hover { background: var(--paper); }
 .mnb .kb-session-item.active { border-color: var(--ink); background: var(--paper); }
 .mnb .kb-session-title { font-size: 13px; font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mnb .kb-session-meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.mnb .kb-session-meta { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
 .mnb .kb-chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .mnb .kb-messages { flex: 1; overflow-y: auto; padding: 4px 2px 12px; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
 .mnb .kb-turn {
@@ -1905,7 +1919,7 @@ const CSS = `
   display: block; width: 96px; height: 120px; object-fit: cover; object-position: top;
 }
 .mnb .kb-thumb-label {
-  display: block; font-size: 11px; color: var(--ink-soft); padding: 3px 4px;
+  display: block; font-size: 12px; color: var(--ink-soft); padding: 3px 4px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
@@ -4202,10 +4216,17 @@ export default function App() {
     }
   }, [detailIndex, similarOpen]);
 
-  // Keyboard navigation for detail modal (ArrowLeft/ArrowRight)
+  // Keyboard navigation for detail modal (ArrowLeft/ArrowRight/Escape)
   useEffect(() => {
     if (!detail || previewSolutionImage || showDeleteConfirm) return;
     const handler = (e) => {
+      if (e.key === 'Escape') {
+        // 相似题弹窗叠在详情弹窗之上时，Esc 先关闭顶层
+        if (similarOpen) return;
+        e.preventDefault();
+        closeDetailModal();
+        return;
+      }
       if (similarOpen) return;
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
@@ -4214,7 +4235,20 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [detail, previewSolutionImage, showDeleteConfirm, hasPrev, hasNext, detailDirty, similarOpen]);
+  }, [detail, previewSolutionImage, showDeleteConfirm, hasPrev, hasNext, detailDirty, detailSaving, similarOpen]);
+
+  // Escape closes the similar-problem finder modal
+  useEffect(() => {
+    if (!similarOpen) return;
+    const handler = (e) => {
+      if (e.key !== 'Escape') return;
+      if (similarBusy) return;
+      e.preventDefault();
+      closeSimilarFinder();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [similarOpen, similarBusy]);
 
   function switchSubject(subj) {
     setActiveSubject(subj);
@@ -5250,7 +5284,7 @@ export default function App() {
                         </div>
                         <div className="info">
                           <span className="status new">● 待索引</span>
-                          <div style={{ fontSize: 10.5, marginTop: 2 }}>{img.file_name}</div>
+                          <div style={{ fontSize: 12, marginTop: 2 }}>{img.file_name}</div>
                         </div>
                       </div>
                     ))}
@@ -5584,8 +5618,8 @@ export default function App() {
               <ChevronRight size={20} />
             </button>
 
-            <div className="modal detail-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-close" onClick={closeDetailModal}><X size={16} /></div>
+            <div className="modal detail-modal" role="dialog" aria-modal="true" aria-label="错题详情" onClick={(e) => e.stopPropagation()}>
+              <button type="button" className="modal-close" onClick={closeDetailModal} aria-label="关闭"><X size={16} /></button>
               <div className="detail-layout">
                 <div className="detail-visual">
                   <img src={API.imageUrl(detail.file_path)} alt={detail.title}
@@ -5799,8 +5833,8 @@ export default function App() {
       {/* ============ 找相似题弹窗 ============ */}
       {similarOpen && (
         <div className="modal-overlay similar-modal-overlay" onClick={() => { if (!similarBusy) closeSimilarFinder(); }}>
-          <div className="modal similar-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={closeSimilarFinder} disabled={similarBusy}>
+          <div className="modal similar-modal" role="dialog" aria-modal="true" aria-label="找相似题" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={closeSimilarFinder} disabled={similarBusy} aria-label="关闭">
               <X size={16} />
             </button>
             <h2 style={{ fontSize: 18, marginBottom: 8 }}>🔍 找相似题</h2>
@@ -5829,7 +5863,7 @@ export default function App() {
               <div className="field" style={{ marginBottom: 8 }}>
                 <label className="field-label">
                   题目文字
-                  <span style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--pencil)', marginLeft: 6 }}>
+                  <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--pencil)', marginLeft: 6 }}>
                     （至少 2 个字，可只输入题目片段，越完整越准确）
                   </span>
                 </label>
@@ -5953,8 +5987,8 @@ export default function App() {
       {/* 删除确认弹窗 */}
       {showDeleteConfirm && (
         <div className="modal-overlay" onClick={() => { if (!deleting) setShowDeleteConfirm(false); }}>
-          <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => { if (!deleting) setShowDeleteConfirm(false); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="确认删除" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="modal-close" onClick={() => { if (!deleting) setShowDeleteConfirm(false); }} aria-label="关闭">
               <X size={16} />
             </button>
             <h2 style={{ fontSize: 17, marginBottom: 8 }}>确认删除</h2>
@@ -6015,7 +6049,7 @@ export default function App() {
                 取消
               </button>
               {deleteMode === 'index' ? (
-                <button className="save-btn" style={{ marginTop: 0, background: 'var(--accent-2)', borderColor: 'var(--accent-2)' }}
+                <button className="save-btn" style={{ marginTop: 0, background: 'var(--accent-2-deep)', borderColor: 'var(--accent-2-deep)' }}
                   onClick={() => deleteFromIndex(detail.file_path)}
                   disabled={deleting}>
                   仅移除索引
