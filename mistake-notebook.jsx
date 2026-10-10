@@ -1025,6 +1025,19 @@ const CSS = `
   font-family: "Songti SC", "STSong", serif;
   font-size: 19px; margin: 0 0 10px; padding-right: 30px;
 }
+/* 错题标题：阅读态 h2 与编辑态 input 共用同一套盒模型（行高/内边距/边框/外边距完全一致），
+   切换编辑状态时标题区高度不变，垂直居中的弹窗边框就不会上下位移。
+   阅读态用透明底边框占位，保证与输入框的 1.5px 边框等宽等高。 */
+.mnb .detail-content .detail-title {
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 19px; font-weight: 700; line-height: 28px;
+  width: 100%; margin: 0 0 10px; padding: 7px 30px 7px 2px;
+  border: none; border-bottom: 1.5px solid transparent;
+  background: transparent; outline: none;
+  min-height: 43.5px; /* 28 行高 + 14 内边距 + 1.5 边框 */
+}
+.mnb .detail-content input.detail-title { border-bottom-color: var(--grid); }
+.mnb .detail-content input.detail-title:focus { border-bottom-color: var(--margin); }
 .mnb .modal .summary {
   font-size: 15px; line-height: 1.9;
   color: #1b3f7a; /* 加深的深蓝色：AI 分析的解题思路 */
@@ -5702,19 +5715,17 @@ export default function App() {
 
                   {/* 可编辑标题 */}
                   {editingTitle ? (
-                    <div className="field" style={{ marginBottom: 10 }}>
-                      <input type="text" value={editTitleValue}
-                        onChange={(e) => setEditTitleValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') saveDetailTitle();
-                          if (e.key === 'Escape') { setEditTitleValue(detail.title || ''); setEditingTitle(false); }
-                        }}
-                        onBlur={saveDetailTitle}
-                        autoFocus
-                        style={{ fontSize: 19, fontWeight: 700, fontFamily: '"Songti SC", "STSong", serif' }} />
-                    </div>
+                    <input type="text" className="detail-title" value={editTitleValue}
+                      onChange={(e) => setEditTitleValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveDetailTitle();
+                        if (e.key === 'Escape') { setEditTitleValue(detail.title || ''); setEditingTitle(false); }
+                      }}
+                      onBlur={saveDetailTitle}
+                      autoFocus />
                   ) : (
-                    <h2 onClick={() => { setEditingTitle(true); setEditTitleValue(detail.title || ''); }}
+                    <h2 className="detail-title"
+                      onClick={() => { setEditingTitle(true); setEditTitleValue(detail.title || ''); }}
                       style={{ cursor: 'pointer' }} title="点击编辑标题">
                       {detail.title || '未命名题目'} <Edit3 size={13} style={{ opacity: 0.4, verticalAlign: 'middle' }} />
                     </h2>
