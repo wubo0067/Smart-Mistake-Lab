@@ -4615,12 +4615,19 @@ export default function App() {
     return () => { if (autoSaveToastTimerRef.current) clearTimeout(autoSaveToastTimerRef.current); };
   }, []);
 
-  // 合并标签：保留已有，追加 AI 新识别（不覆盖、不重复）
-  function mergeTags(existingTags, incomingTags) {
-    const base = Array.isArray(existingTags) ? existingTags : [];
-    const incoming = Array.isArray(incomingTags) ? incomingTags : [];
-    const seen = new Set(base);
-    return [...base, ...incoming.filter((t) => !seen.has(t))];
+  // 重新分析的知识点标签：旧标签全部作废，仅保留 AI 本次识别的结果（去重、去空）
+  function normalizeAnalyzedTags(tags) {
+    const list = Array.isArray(tags) ? tags : [];
+    const result = [];
+    const seen = new Set();
+    for (const raw of list) {
+      if (typeof raw !== 'string') continue;
+      const tag = raw.trim();
+      if (!tag || seen.has(tag)) continue;
+      seen.add(tag);
+      result.push(tag);
+    }
+    return result;
   }
 
   // --- AI 重新分析（详情弹窗） ---
@@ -4645,7 +4652,6 @@ export default function App() {
         text: solutionTextRef.current,
         images: solutionImagesRef.current,
       }),
-      existingTags: detail.tags || [],
       existingSummary: prevSummary,
       existingContent: (detailContentRef.current || detail.content || ''),
       existingDifficulty: typeof detail.difficulty === 'number' ? detail.difficulty : 3,
@@ -4679,7 +4685,8 @@ export default function App() {
 
       // 计算 AI 结果在各字段上的最终值（前台/后台共用）
       const newContent = result.content || '';
-      const mergedTags = mergeTags(snapshot.existingTags, result.tags);
+      // 重新分析：丢弃原有知识点标签，直接使用 AI 本次识别的标签
+      const analyzedTags = normalizeAnalyzedTags(result.tags);
       const newSummary = result.summary || snapshot.existingSummary;
       const d = Number(result.difficulty);
       const newDifficulty = (Number.isInteger(d) && d >= 1 && d <= 5)
@@ -4693,7 +4700,7 @@ export default function App() {
             snapshot.title,
             newSummary,
             newContent || snapshot.existingContent,
-            mergedTags,
+            analyzedTags,
             snapshot.notes,
             snapshot.mastery,
             snapshot.practice_count,
@@ -4706,7 +4713,7 @@ export default function App() {
           const patch = {
             summary: newSummary,
             content: newContent || snapshot.existingContent,
-            tags: mergedTags,
+            tags: analyzedTags,
             difficulty: newDifficulty,
           };
           setAllIndexed((prev) => prev.map((p) => (p.file_path === analyzedPath ? { ...p, ...patch } : p)));
@@ -4736,13 +4743,12 @@ export default function App() {
         detailContentRef.current = newContent;
         if (detailContentTextareaRef.current) detailContentTextareaRef.current.value = newContent;
       }
-      // 合并标签：保留已有标签，仅把 AI 新识别出的标签追加进去（不覆盖、不重复）
+      // 重置知识点标签：丢弃原有标签，替换为 AI 本次识别的标签
       setDetail((prev) => {
         // 双重校验：prev 必须是发起分析的那道题，否则不动
         if (!prev || prev.file_path !== analyzedPath) return prev;
         const updates = {
-          // 以 prev 的最新标签为基底合并，避免并发请求下覆盖掉刚写入的结果
-          tags: mergeTags(prev.tags, result.tags),
+          tags: analyzedTags,
           // 解题思路（summary）直接覆盖更新
           summary: newSummary,
           // 题目内容更新为 AI 提取的完整内容
@@ -4752,12 +4758,10 @@ export default function App() {
         return { ...prev, ...updates };
       });
       setDetailDirty(true);
-      const added = (Array.isArray(result.tags) ? result.tags : [])
-        .filter((t) => !(snapshot.existingTags.includes(t)));
       const promptSuffix = prompt ? '（已按你的提示方向重新分析）' : '';
-      setDetailAnalyzeMsg((added.length > 0
-        ? `AI 重新分析完成：新增 ${added.length} 个标签，解题思路与题目内容已更新。`
-        : 'AI 重新分析完成：解题思路与题目内容已更新，无新增标签。') + `请点击「保存修改」生效${promptSuffix}。`);
+      setDetailAnalyzeMsg((analyzedTags.length > 0
+        ? `AI 重新分析完成：知识点标签已重置为 ${analyzedTags.length} 个，解题思路与题目内容已更新。`
+        : 'AI 重新分析完成：原知识点标签已清空，解题思路与题目内容已更新。') + `请点击「保存修改」生效${promptSuffix}。`);
     } catch (e) {
       console.error('[ReAnalyze] failed:', e);
       // 题目已关闭/切换时，错误也走后台提示；前台则显示在弹窗内
