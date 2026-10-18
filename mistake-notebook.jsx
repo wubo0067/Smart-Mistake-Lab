@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, Send, Square, MessageSquare, Upload, Activity, FileText, Link2, Images } from 'lucide-react';
+import { X, Plus, Search, Loader2, Sparkles, Trash2, BookOpen, AlertCircle, RefreshCw, FolderOpen, Settings, Edit3, Check, ChevronLeft, ChevronRight, ChevronDown, Target, History, ZoomIn, ZoomOut, Maximize, RotateCw, Send, Square, MessageSquare, Upload, Activity, FileText, Link2, Images } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -1178,6 +1178,10 @@ const CSS = `
   -webkit-user-drag: none;
   margin: 0; border: none;
 }
+.mnb .zoom-preview-image-frame {
+  position: relative;
+  flex-shrink: 0;
+}
 .mnb .zoom-preview-toolbar {
   /* 放在图片滚动区下方，作为常规流布局，不再悬浮遮挡图片 */
   position: static;
@@ -2310,6 +2314,7 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
   const prevFocusRef = useRef(null);
   const [nat, setNat] = useState(null);   // { w, h } 自然尺寸
   const [scale, setScale] = useState(1);
+  const [rotation, setRotation] = useState(0);
   const scaleRef = useRef(1);
   scaleRef.current = scale;
   const natRef = useRef(null);
@@ -2380,10 +2385,9 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
   }
 
   function computeFitScale(w, h) {
-    // 基于滚动容器的实际可视尺寸计算，确保适应窗口时不出现滚动条/溢出
-    const el = scrollRef.current;
-    const maxW = (el ? el.clientWidth : window.innerWidth * 0.92) - 24;
-    const maxH = (el ? el.clientHeight : window.innerHeight * 0.92) - 24;
+    // 使用滚动容器的 CSS 最大边界，避免容器被当前图片尺寸撑小时影响旋转后的适配计算
+    const maxW = window.innerWidth * 0.92 - 24;
+    const maxH = window.innerHeight * 0.92 - 116 - 24;
     return Math.min(maxW / w, maxH / h, 1);
   }
 
@@ -2405,6 +2409,7 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
   useLayoutEffect(() => {
     setNat(null);
     setScale(1);
+    setRotation(0);
     scaleRef.current = 1;
     setOffset({ x: 0, y: 0 });
   }, [currentSrc]);
@@ -2471,10 +2476,25 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
   function zoomIn() { zoomCentered(scaleRef.current * ZOOM_STEP); }
   function zoomOut() { zoomCentered(scaleRef.current / ZOOM_STEP); }
   function showActual() { zoomCentered(1); }
+  function rotateImage() {
+    const n = natRef.current;
+    if (!n) return;
+    const nextRotation = (rotation + 90) % 360;
+    const isQuarterTurn = nextRotation % 180 !== 0;
+    const width = isQuarterTurn ? n.h : n.w;
+    const height = isQuarterTurn ? n.w : n.h;
+    setRotation(nextRotation);
+    setScale(computeFitScale(width, height));
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) { el.scrollLeft = 0; el.scrollTop = 0; }
+    });
+  }
   function resetFit() {
     const n = natRef.current;
     if (!n) return;
-    setScale(computeFitScale(n.w, n.h));
+    const isQuarterTurn = rotation % 180 !== 0;
+    setScale(computeFitScale(isQuarterTurn ? n.h : n.w, isQuarterTurn ? n.w : n.h));
     requestAnimationFrame(() => {
       const el = scrollRef.current;
       if (el) { el.scrollLeft = 0; el.scrollTop = 0; }
@@ -2493,7 +2513,10 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
   }
 
   const zoomPercent = Math.round(scale * 100);
-  const fitScale = nat ? computeFitScale(nat.w, nat.h) : 1;
+  const isQuarterTurn = rotation % 180 !== 0;
+  const displayWidth = nat ? (isQuarterTurn ? nat.h : nat.w) : 0;
+  const displayHeight = nat ? (isQuarterTurn ? nat.w : nat.h) : 0;
+  const fitScale = nat ? computeFitScale(displayWidth, displayHeight) : 1;
   const nearFit = Math.abs(scale - fitScale) < 0.01;
 
   return (
@@ -2514,14 +2537,26 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
           onDoubleClick={handleDoubleClick}
           title="滚轮缩放 · 双击切换 适应窗口/原始大小"
         >
-          <img
-            key={currentSrc}
-            src={currentSrc}
-            alt={alt || '图片预览'}
-            draggable={false}
-            onLoad={handleImgLoad}
-            style={nat ? { width: nat.w * scale, height: nat.h * scale } : { visibility: 'hidden', maxWidth: '92vw', maxHeight: '80vh' }}
-          />
+          <div className="zoom-preview-image-frame" style={nat ? {
+            width: displayWidth * scale,
+            height: displayHeight * scale,
+          } : { visibility: 'hidden', width: '92vw', height: '80vh' }}>
+            <img
+              key={currentSrc}
+              src={currentSrc}
+              alt={alt || '图片预览'}
+              draggable={false}
+              onLoad={handleImgLoad}
+              style={nat ? {
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                width: nat.w * scale,
+                height: nat.h * scale,
+                transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+              } : { maxWidth: '92vw', maxHeight: '80vh' }}
+            />
+          </div>
         </div>
         <div className="zoom-preview-toolbar">
           <button className="zoom-tool-btn" onClick={zoomOut}
@@ -2543,6 +2578,10 @@ function ZoomableImagePreview({ src, alt, onClose, images, index = 0, onNavigate
           <button className="zoom-tool-btn" onClick={resetFit}
             disabled={!nat || nearFit} title="适应窗口">
             <Maximize size={14} />
+          </button>
+          <button className="zoom-tool-btn" onClick={rotateImage}
+            disabled={!nat} title="顺时针旋转 90°" aria-label="顺时针旋转 90°">
+            <RotateCw size={15} />
           </button>
           {canNav && (
             <>
