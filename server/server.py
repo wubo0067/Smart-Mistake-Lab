@@ -31,6 +31,8 @@ import httpx
 import db
 from log import logger
 from llm import (
+    MAX_BLACKLIST_ITEM_CHARS,
+    MAX_BLACKLIST_ITEMS,
     AiConfig,
     analyze_image,
     generate_encouragements,
@@ -142,6 +144,65 @@ def _infer_subject(file_path: str) -> str:
         return parts[0] if len(parts) > 1 else ""
     except ValueError:
         return ""
+
+
+# ============== AI 解题禁用知识点（黑名单） ==============
+
+# 学生自定义禁用知识点存储键：按学生隔离在各自 data.db 的 config 表中，值为 JSON 数组
+BLACKLIST_CONFIG_KEY = "blacklist_knowledges"
+
+
+def _normalize_blacklist_knowledges(value) -> list[str]:
+    """归一化黑名单输入：支持 JSON 数组、JSON 字符串、换行/逗号分隔的纯文本。
+
+    同时执行上限校验：单条超过 MAX_BLACKLIST_ITEM_CHARS 字符视为无效输入丢弃，
+    总条数超过 MAX_BLACKLIST_ITEMS 时截断，避免撑爆解题 Prompt。
+    """
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            # 兼容「一行一个」或逗号分隔的纯文本写法
+            value = re.split(r"[\n,，;；]+", raw)
+    if not isinstance(value, (list, tuple)):
+        return []
+
+    result: list[str] = []
+    seen: set[str] = set()
+    dropped_too_long = 0
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if not name:
+            continue
+        if len(name) > MAX_BLACKLIST_ITEM_CHARS:
+            dropped_too_long += 1
+            continue
+        key = re.sub(r"\s+", "", name).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(name)
+
+    if dropped_too_long:
+        logger.warning(
+            f"[黑名单] 忽略 {dropped_too_long} 条超过 {MAX_BLACKLIST_ITEM_CHARS} 字的禁用知识点"
+        )
+    if len(result) > MAX_BLACKLIST_ITEMS:
+        logger.warning(
+            f"[黑名单] 禁用知识点 {len(result)} 条超过上限 {MAX_BLACKLIST_ITEMS} 条，已截断"
+        )
+        result = result[:MAX_BLACKLIST_ITEMS]
+    return result
+
+
+def _get_blacklist_knowledges() -> list[str]:
+    """读取当前学生的自定义禁用知识点。"""
+    return _normalize_blacklist_knowledges(db.get_config_value(BLACKLIST_CONFIG_KEY))
 
 
 # 解答图片文件名模式，用于在扫描时排除（避免解答图被当成错题扫出来）
@@ -343,6 +404,7 @@ def get_config():
         "sida_agent_port": db.get_global_config_value("sida_agent_port")
         or str(SIDA_AGENT_DEFAULT_PORT),
         "chat_session_page_size": db.get_chat_session_page_size(),
+        "blacklist_knowledges": _get_blacklist_knowledges(),
     }
 
 
@@ -436,6 +498,12 @@ def update_config(data: dict):
                 )
             db.set_global_config_value("chat_session_page_size", str(num))
             logger.info(f"知识库会话列表每批条数已更新：{num}")
+    if BLACKLIST_CONFIG_KEY in data:
+        items = _normalize_blacklist_knowledges(data[BLACKLIST_CONFIG_KEY])
+        db.set_config_value(
+            BLACKLIST_CONFIG_KEY, json.dumps(items, ensure_ascii=False)
+        )
+        logger.info(f"AI 解题禁用知识点已更新：{len(items)} 条")
     return get_config()
 
 
@@ -1206,13 +1274,18 @@ async def analyze(data: dict):
     user_prompt = (data.get("user_prompt") or "").strip() or None
     # 可选：上一次 AI 生成的解题思路，重新分析时在此基础上改进
     previous_summary = (data.get("previous_summary") or "").strip() or None
+    # 禁用知识点：学生配置（data.db）+ 本次请求临时追加，合并去重后注入 Prompt
+    blacklist_knowledges = _normalize_blacklist_knowledges(
+        _get_blacklist_knowledges()
+        + _normalize_blacklist_knowledges(data.get("blacklist_knowledges"))
+    )
 
     image_config = AiConfig.for_image_analysis()
     problem_config = AiConfig.for_problem_analysis()
 
     subject = _infer_subject(resolved_path)
     logger.info(
-        f'[API] 收到分析请求：{file_path} -> {resolved_path}, subject={subject}, 提供 content={"是" if content else "否"}, 提供 user_prompt={"是" if user_prompt else "否"}, 提供 previous_summary={"是" if previous_summary else "否"}'
+        f'[API] 收到分析请求：{file_path} -> {resolved_path}, subject={subject}, 提供 content={"是" if content else "否"}, 提供 user_prompt={"是" if user_prompt else "否"}, 提供 previous_summary={"是" if previous_summary else "否"}, 禁用知识点={len(blacklist_knowledges)} 条'
     )
 
     try:
@@ -1224,6 +1297,7 @@ async def analyze(data: dict):
             content=content,
             user_prompt=user_prompt,
             previous_summary=previous_summary,
+            blacklist_knowledges=blacklist_knowledges,
         )
         logger.info(f'[API] 分析完成：{file_path} -> tags={result.get("tags", [])}')
         return result

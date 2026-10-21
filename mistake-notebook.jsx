@@ -87,6 +87,10 @@ function TokenDailyChart({ daily }) {
   );
 }
 
+// AI 解题禁用知识点输入上限（与后端 llm.MAX_BLACKLIST_ITEMS / MAX_BLACKLIST_ITEM_CHARS 保持一致）
+const BLACKLIST_MAX_ITEMS = 50;
+const BLACKLIST_MAX_ITEM_CHARS = 30;
+
 // ============== API HELPERS ==============
 
 // 当前学生 id：存 localStorage，所有请求经 X-Student-Id 头带给后端
@@ -3478,6 +3482,8 @@ export default function App() {
   const [dirMsg, setDirMsg] = useState('');
   const [focusTimeoutHours, setFocusTimeoutHours] = useState(48);
   const [focusTimeoutInput, setFocusTimeoutInput] = useState('48');
+  // AI 解题禁用知识点（黑名单）：一行一个，保存后对当前学生的 AI 分析生效
+  const [blacklistInput, setBlacklistInput] = useState('');
 
   // --- sida-agent 知识库服务配置 ---
   const [sidaHostInput, setSidaHostInput] = useState('127.0.0.1');
@@ -3636,6 +3642,11 @@ export default function App() {
       if (c.sida_agent_port) setSidaPortInput(String(c.sida_agent_port));
       const ps = Number(c.chat_session_page_size);
       if (ps >= 1 && ps <= 200) setChatPageSizeInput(String(ps));
+      if (Array.isArray(c.blacklist_knowledges)) {
+        setBlacklistInput(c.blacklist_knowledges.join('\n'));
+      } else {
+        setBlacklistInput('');
+      }
     }).catch(() => { });
   }
 
@@ -3981,8 +3992,16 @@ export default function App() {
       if (!isNaN(maxPerSubjectVal) && maxPerSubjectVal >= 1 && maxPerSubjectVal <= 50) {
         payload.focus_max_per_subject = maxPerSubjectVal;
       }
+      // 同时保存 AI 解题禁用知识点（一行一个）
+      payload.blacklist_knowledges = blacklistInput
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const result = await API.saveConfig(payload);
       setImageDir(dirInput.trim());
+      if (Array.isArray(result.blacklist_knowledges)) {
+        setBlacklistInput(result.blacklist_knowledges.join('\n'));
+      }
       if (result.focus_timeout_hours) {
         setFocusTimeoutHours(Number(result.focus_timeout_hours));
       }
@@ -5108,6 +5127,17 @@ export default function App() {
                     当前：{focusMaxPerSubject} 道/学科
                   </span>
                 </div>
+              </div>
+              <div className="field" style={{ marginTop: 14, marginBottom: 0 }}>
+                <label className="field-label">AI 解题禁用知识点（黑名单）</label>
+                <textarea rows={4} value={blacklistInput}
+                  onChange={(e) => setBlacklistInput(e.target.value)}
+                  placeholder={'一行一个，例如：\n韦达定理\n相似三角形\n导数'} />
+                <span style={{ fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 3, display: 'block' }}>
+                  这些知识点将作为硬性约束注入 AI 解题 Prompt，禁止其用于推导和 tags；学科内置的初中超纲清单始终生效。
+                  最多 {BLACKLIST_MAX_ITEMS} 条、每条不超过 {BLACKLIST_MAX_ITEM_CHARS} 字（当前 {blacklistInput.split(/[\n,，;；]+/).filter((s) => s.trim()).length} 条），超限部分会被忽略。
+                  建议写标准考点名称（如「积分法」而非「积分」），避免误伤正常考点。
+                </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
                 <button className="save-btn" style={{ marginTop: 0 }} onClick={saveImageDir} disabled={dirSaving}>

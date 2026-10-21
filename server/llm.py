@@ -1062,6 +1062,67 @@ CHINESE_KNOWLEDGE_POINTS = [
     "传统文化",
 ]
 
+# ============== 学科禁止使用的知识点（黑名单） ==============
+# 仅收录初中阶段明确不要求、但大模型容易顺手使用的高中/大学知识。
+# 学生个性化的补充项存放在 data.db 的 config 表（key=blacklist_knowledges），
+# 由 server 层读取后通过 build_analysis_prompt(blacklist_knowledges=...) 传入。
+
+MATH_BLACKLIST_KNOWLEDGES = [
+    "导数与微分",
+    # 写成"积分法"而不是"积分"：避免作为子串误伤"面积分割"等正常初中考点
+    "积分法",
+    "极限",
+    "洛必达法则",
+    "向量",
+    "复数",
+    "对数运算",
+    "指数函数",
+    "三角函数的和差化积与积化和差",
+]
+
+PHYSICS_BLACKLIST_KNOWLEDGES = [
+    "动量守恒定律",
+    "动量定理",
+    "动能定理",
+    "牛顿第二定律定量计算",
+    "万有引力定律",
+    "电场与电势",
+    "安培力",
+    "洛伦兹力",
+    "法拉第电磁感应定律",
+    "理想气体状态方程",
+    "简谐运动",
+    "机械能守恒定律",
+]
+
+CHEMISTRY_BLACKLIST_KNOWLEDGES = [
+    "物质的量与摩尔",
+    "化学平衡",
+    "化学平衡常数",
+    "勒夏特列原理",
+    "电离平衡",
+    "盐类水解",
+    "焓变与盖斯定律",
+    "杂化轨道理论",
+    "电极电势",
+    "溶度积",
+]
+
+ENGLISH_BLACKLIST_KNOWLEDGES = [
+    "虚拟语气",
+    "独立主格结构",
+    "倒装句",
+    "强调句",
+    "非谓语动词作状语",
+    "名词性从句",
+]
+
+CHINESE_BLACKLIST_KNOWLEDGES = [
+    "音韵学",
+    "训诂学",
+    "文学理论专业术语",
+]
+
 # ============== 学科配置 ==============
 
 SUBJECT_CONFIG = {
@@ -1069,26 +1130,31 @@ SUBJECT_CONFIG = {
         "role": "经验丰富的初中数学老师",
         "knowledge_points": MATH_KNOWLEDGE_POINTS,
         "models": MATH_MODELS,
+        "blacklist_knowledges": MATH_BLACKLIST_KNOWLEDGES,
     },
     "物理": {
         "role": "经验丰富的初中物理老师",
         "knowledge_points": PHYSICS_KNOWLEDGE_POINTS,
         "models": PHYSICS_MODELS,
+        "blacklist_knowledges": PHYSICS_BLACKLIST_KNOWLEDGES,
     },
     "化学": {
         "role": "经验丰富的初中化学老师",
         "knowledge_points": CHEMISTRY_KNOWLEDGE_POINTS,
         "models": CHEMISTRY_MODELS,
+        "blacklist_knowledges": CHEMISTRY_BLACKLIST_KNOWLEDGES,
     },
     "英语": {
         "role": "经验丰富的初中英语老师",
         "knowledge_points": ENGLISH_KNOWLEDGE_POINTS,
         "models": [],
+        "blacklist_knowledges": ENGLISH_BLACKLIST_KNOWLEDGES,
     },
     "语文": {
         "role": "经验丰富的初中语文老师",
         "knowledge_points": CHINESE_KNOWLEDGE_POINTS,
         "models": [],
+        "blacklist_knowledges": CHINESE_BLACKLIST_KNOWLEDGES,
     },
 }
 
@@ -1096,6 +1162,7 @@ DEFAULT_SUBJECT_CONFIG = {
     "role": "经验丰富的中学老师",
     "knowledge_points": [],
     "models": [],
+    "blacklist_knowledges": [],
 }
 
 
@@ -1136,6 +1203,11 @@ LARGE_KNOWLEDGE_POINT_TOKENS = 12288  # 长上下文云端模型，可完整包�
 DEFAULT_MODEL_HINT_TOKENS = 4608
 SMALL_MODEL_HINT_TOKENS = 4608
 LARGE_MODEL_HINT_TOKENS = 12288
+
+# 禁用知识点清单上限：黑名单是硬性约束，需要完整出现在 prompt 里，
+# 但学生可自定义输入，因此限制条数与单条长度，避免无上限地撑大 prompt。
+MAX_BLACKLIST_ITEMS = 50  # 最多注入的禁用知识点条数（超出部分截断）
+MAX_BLACKLIST_ITEM_CHARS = 30  # 单条禁用知识点的最大字符数（超出视为无效输入）
 
 
 def _env_int(name: str, default: int = 0) -> int:
@@ -1261,6 +1333,75 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", "", text or "").lower()
 
 
+def _merge_blacklist_knowledges(*groups: list[str] | None) -> list[str]:
+    """按顺序合并多组禁用知识点，并按归一化名称去重。
+
+    单条超过 MAX_BLACKLIST_ITEM_CHARS 字符的输入视为无效（多半是误把整段
+    说明文字粘进输入框），直接丢弃；合并后最多保留 MAX_BLACKLIST_ITEMS 条，
+    避免自定义输入无上限地撑大 prompt。
+
+    Args:
+        *groups: 任意组禁用知识点名称列表（如学科内置、学生自定义），允许 None
+
+    Returns:
+        list[str]: 去重并截断后的禁用知识点名称，保持首次出现的原始写法
+    """
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group or []:
+            if len(merged) >= MAX_BLACKLIST_ITEMS:
+                return merged
+            if not isinstance(item, str):
+                continue
+            name = item.strip()
+            if not name or len(name) > MAX_BLACKLIST_ITEM_CHARS:
+                continue
+            key = _normalize_text(name)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(name)
+    return merged
+
+
+def _is_blacklisted(item: str, blacklist: list[str]) -> bool:
+    """判断某条目是否命中禁用知识点（忽略空白与大小写的子串匹配）。
+
+    匹配方向：黑名单项作为子串出现在条目中即命中，因此"导数"能命中
+    "导数在单调性判断中的应用"，整句解题模型也能命中其中包含的禁用项。
+
+    两处限制用于避免误伤正常考点：
+    - 单字黑名单项（如"数"）只做全等匹配，否则会命中几乎所有数学考点；
+    - 不做反向匹配（条目包含于黑名单项）。黑名单项通常是知识点短语，
+      反向匹配会把更短的合法考点整条误杀，例如"牛顿第二定律"会被
+      "牛顿第二定律定量计算"删掉、"电磁感应"会被"法拉第电磁感应定律"删掉。
+    """
+    if not item or not blacklist:
+        return False
+    normalized_item = _normalize_text(item)
+    if not normalized_item:
+        return False
+    for name in blacklist:
+        normalized_name = _normalize_text(name)
+        if not normalized_name:
+            continue
+        if len(normalized_name) == 1:
+            if normalized_item == normalized_name:
+                return True
+            continue
+        if normalized_name in normalized_item:
+            return True
+    return False
+
+
+def _filter_blacklisted(items: list[str], blacklist: list[str]) -> list[str]:
+    """从候选列表（考点/解题模型）中剔除命中禁用知识点的条目。"""
+    if not blacklist:
+        return items
+    return [item for item in items if not _is_blacklisted(item, blacklist)]
+
+
 def _format_knowledge_points_for_prompt(
     knowledge_points: list[str], max_tokens: int | None = None
 ) -> str:
@@ -1355,6 +1496,35 @@ def _format_models_for_prompt(
     return "\n".join(prompt_lines)
 
 
+def _format_blacklist_for_prompt(blacklist: list[str]) -> str:
+    """将禁用知识点列表格式化为 Prompt 的硬性约束段落。
+
+    Args:
+        blacklist: 已合并去重的禁用知识点名称列表
+
+    Returns:
+        str: 带换行结尾的约束段落；列表为空时返回空字符串
+    """
+    if not blacklist:
+        return ""
+
+    return "\n".join(
+        [
+            "【禁止使用的知识点（硬性约束）】",
+            "以下知识点与方法属于学生当前学段尚未学习的内容，严禁用于本题解题：",
+            *[f"- {name}" for name in blacklist],
+            "",
+            "必须遵守：",
+            "1. 不得把上述知识作为推导依据、公式、定理、术语或中间结论，即使它能更快得到正确答案。",
+            "2. summary 中不得出现上述名称及其常见同义表述，也不得用“由……可知”“根据……定理”等方式隐式引用。",
+            "3. tags 不得选择上述知识点；应改选其他已学考点，确实没有合适项时输出「未分类」。",
+            "4. 遇到只能使用上述知识才能完成的步骤：改用学生已学的方法完成；若确实没有替代，写「此问超出当前所学范围，需先补充 XXX 知识」，不要直接展示超纲解法。",
+            "5. 本约束优先级最高：上方的候选考点或解题模型中若出现禁用项，直接忽略，不得照搬。",
+            "6. 不得为了规避本约束而使用错误的替代方法，正确性优先；输出前逐句自查 summary 与 tags，发现命中必须改写后再输出。",
+        ]
+    ) + "\n\n"
+
+
 def _map_tags_to_knowledge_points(
     tags: list[str], knowledge_points: list[str]
 ) -> list[str]:
@@ -1440,6 +1610,7 @@ def build_analysis_prompt(
     previous_summary: str = "",
     model: str = "",
     api_url: str = "",
+    blacklist_knowledges: list[str] | None = None,
 ) -> str:
     """根据学科、题目内容、用户补充提示和上一次 AI 思路构建解题分析 Prompt。
 
@@ -1453,6 +1624,7 @@ def build_analysis_prompt(
         previous_summary: 上一次 AI 生成的解题思路（可选），供重新分析时继承与修正
         model: 解题分析所用模型名（可选），用于自动确定候选考点 token 预算档位
         api_url: 解题分析所用端点（可选），与 model 一起用于判断上下文档位
+        blacklist_knowledges: 学生自定义的禁用知识点（可选），与学科内置黑名单合并去重
 
     Returns:
         str: 组装完成的高质量解题分析 Prompt
@@ -1460,7 +1632,12 @@ def build_analysis_prompt(
     # 1. 获取学科专属配置与角色设定
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
     role = cfg["role"]
-    knowledge_points = cfg["knowledge_points"]
+    # 1.1 合并学科内置黑名单与学生自定义黑名单，并从候选中剔除禁用项，
+    #     让模型在“可选范围内”推理，而不是只靠 Prompt 约束
+    blacklist = _merge_blacklist_knowledges(
+        cfg.get("blacklist_knowledges"), blacklist_knowledges
+    )
+    knowledge_points = _filter_blacklisted(cfg["knowledge_points"], blacklist)
     # 2. 根据模型规格计算考点 token 预算并生成考点说明片段
     kp_budget = resolve_knowledge_point_token_budget(model, api_url)
     knowledge_points_section = _format_knowledge_points_for_prompt(
@@ -1468,7 +1645,11 @@ def build_analysis_prompt(
     )
     # 2.1 学科解题模型与易错提醒单独成段注入，仅用于引导推理，不参与 tags 输出
     model_budget = resolve_model_hint_token_budget(model, api_url)
-    models_section = _format_models_for_prompt(cfg.get("models") or [], model_budget)
+    models_section = _format_models_for_prompt(
+        _filter_blacklisted(cfg.get("models") or [], blacklist), model_budget
+    )
+    # 2.2 禁用知识点硬性约束段落（黑名单为空时不注入，保持原有 Prompt 行为）
+    blacklist_section = _format_blacklist_for_prompt(blacklist)
 
     # 3. 构造上一次 AI 解题思路参考区块（仅在用户要求重新分析且传入旧思路时生成）
     previous_summary_section = ""
@@ -1498,6 +1679,19 @@ def build_analysis_prompt(
         kp_section = "4. 结合上方【候选核心考点】输出 1-4 个最匹配的核心考点，按重要程度排序。优先直接选用候选列表中的原始表述；只有候选列表里确实没有合适项时，才自行推理出新的合理考点。命名要简洁、具体、专业，尽量使用学校/教辅中常见的考点表达，不要输出整句分析。若确实无法判断，可输出「未分类」。"
     else:
         kp_section = "4. 自行推理出题目涉及的知识点（命名风格：简洁、具体、专业，不要过于笼统）。"
+    if blacklist:
+        kp_section += "不得选择或推理出上方禁用知识点清单中的任何一项。"
+
+    # 5.1 黑名单自查步骤（仅在配置了禁用知识点时注入，避免打乱无黑名单时的步骤编号）
+    if blacklist:
+        blacklist_step = (
+            "5. 输出前对照上方禁用知识点清单自查：逐句检查 summary 与 tags，"
+            "确认没有出现禁用名称、同义表述或依赖禁用知识的推导；发现命中必须改写后再输出。\n"
+        )
+        difficulty_step_no = "6"
+    else:
+        blacklist_step = ""
+        difficulty_step_no = "5"
 
     # 6. 整合组装完整的 Prompt 文本
     return "".join(
@@ -1511,12 +1705,14 @@ def build_analysis_prompt(
             user_prompt_section,
             knowledge_points_section + "\n\n" if knowledge_points_section else "",
             models_section + "\n\n" if models_section else "",
+            blacklist_section,
             "【步骤】\n",
             "1. 先以【题目文本】为最高优先级审题，逐句识别题目的实验/推理顺序、每一步的初始状态、过程变化和最终比较对象。若【已知条件与约束】中的概括与【题目文本】冲突，必须以【题目文本】为准，不得沿用错误概括。\n",
             "2. 对连续过程题、多步实验题、先后变化题，必须特别检查后一步是否建立在前一步结果之上。不要把“同一对象的连续变化”误判为“多个彼此独立且初始状态相同的过程”，也不要默认系统会在步骤之间自动复原。\n",
             "3. 检查【求解任务】中一共包含几个小问（如 (1)(2)(3)、①②③、第一问/第二问等）。若有多问，请先数清楚问题数量，为后续按问题逐段撰写 summary 做准备；若只有一问，则无需分段。\n",
             kp_section + "\n",
-            "5. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n",
+            blacklist_step,
+            f"{difficulty_step_no}. 判断题目难度，给出 1-5 星（整数）：1 星为最基础的送分题，2 星为简单题，3 星为常规中等题，4 星为较难综合题，5 星为压轴难题。只输出整数，不要输出其他内容。\n",
             "\n",
             "【输出格式】\n",
             "只输出一个 JSON 对象，不要有任何其他文字，不要用 markdown 代码块包裹。必须且只能包含以下 4 个字段，缺一不可：\n",
@@ -2530,6 +2726,7 @@ async def analyze_image(
     content: str | None = None,
     user_prompt: str | None = None,
     previous_summary: str | None = None,
+    blacklist_knowledges: list[str] | None = None,
 ) -> dict:
     """分析错题图片，返回 {content, summary, tags, difficulty}。
 
@@ -2548,6 +2745,7 @@ async def analyze_image(
         content: 已提取的题目内容，若非空则直接复用并跳过 OCR 阶段
         user_prompt: 用户自定义的解题约束（如"还没学微积分"、"重点讲第2问"），注入 Prompt
         previous_summary: 上一次生成的解题思路，重新分析时在此基础上修正与改进
+        blacklist_knowledges: 学生自定义的禁用知识点，与学科内置黑名单合并后注入 Prompt
 
     Returns:
         dict: 包含 'content', 'summary', 'tags', 'difficulty' 四个字段的结果字典
@@ -2601,6 +2799,7 @@ async def analyze_image(
         previous_summary or "",
         model=problem_config.model,
         api_url=problem_api_url,
+        blacklist_knowledges=blacklist_knowledges,
     )
     # 打印当前考点预算信息以供监控
     kp_budget = resolve_knowledge_point_token_budget(
@@ -2616,6 +2815,11 @@ async def analyze_image(
         logger.info(
             f"[LLM] 已附带上一次 AI 解题思路（{len(previous_summary)} 字）作为参考"
         )
+    if blacklist_knowledges:
+        logger.info(
+            f"[LLM] 已附加学生自定义禁用知识点 {len(blacklist_knowledges)} 条："
+            f"{'、'.join(blacklist_knowledges[:8])}"
+        )
     # 发起纯文本 HTTP 请求
     response_text = await _call_ai(problem_config, problem_api_url, "", "", prompt)
 
@@ -2627,10 +2831,18 @@ async def analyze_image(
         raise RuntimeError(f"AI 返回的不是有效 JSON: {e}")
 
     # 4. 将 AI 生成的标签映射回当前学科的官方标准考点库
+    #    映射候选集同样剔除禁用知识点，避免模型换个说法后又被映射回黑名单考点
     cfg = SUBJECT_CONFIG.get(subject, DEFAULT_SUBJECT_CONFIG)
-    result["tags"] = _map_tags_to_knowledge_points(
-        result.get("tags", []), cfg.get("knowledge_points", [])
+    effective_blacklist = _merge_blacklist_knowledges(
+        cfg.get("blacklist_knowledges"), blacklist_knowledges
     )
+    result["tags"] = _map_tags_to_knowledge_points(
+        result.get("tags", []),
+        _filter_blacklisted(cfg.get("knowledge_points") or [], effective_blacklist),
+    )
+    # 映射函数在考点库为空（未知学科）时会原样返回模型标签，因此映射后
+    # 再按黑名单兜底过滤一次，保证禁用知识点不会落库
+    result["tags"] = _filter_blacklisted(result.get("tags") or [], effective_blacklist)
 
     # 5. 回填提取的题目文本作为最终 content 字段
     result["content"] = content
