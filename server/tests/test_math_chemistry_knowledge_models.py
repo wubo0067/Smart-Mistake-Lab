@@ -211,5 +211,53 @@ class TestTagMappingUnaffectedByModels(unittest.TestCase):
         self.assertEqual(_map_tags_to_knowledge_points(tags, []), tags)
 
 
+@mock.patch.dict(os.environ, {"MODEL_HINT_TOKENS": "", "KNOWLEDGE_POINT_TOKENS": ""})
+class TestTagMappingConfidenceThreshold(unittest.TestCase):
+    """低置信度标签必须被丢弃，而不是被强行映射到无关考点。"""
+
+    def test_low_confidence_tags_are_dropped_not_mapped(self):
+        # 这些标签与任何考点都只是零散字符/公式符号重合，硬映射会得到无关考点
+        noise_tags = [
+            "sin2A=2sinAcosA",
+            "a/sinA=b/sinB=c/sinC=2R",
+            "认真计算",
+            "画图",
+            "略",
+            "未分类",
+            "此问超出当前所学范围",
+        ]
+        for tag in noise_tags:
+            with self.subTest(tag=tag):
+                mapped = _map_tags_to_knowledge_points([tag], MATH_KNOWLEDGE_POINTS)
+                self.assertEqual(mapped, [])
+
+    def test_all_low_confidence_returns_empty_not_original_tags(self):
+        # 全部低置信度时返回空列表，而不是把原始噪声标签原样兜底返回
+        mapped = _map_tags_to_knowledge_points(
+            ["sin2A=2sinAcosA", "认真计算"], MATH_KNOWLEDGE_POINTS
+        )
+        self.assertEqual(mapped, [])
+
+    def test_high_confidence_alias_still_maps(self):
+        # 短别名靠子串包含命中，仍应正常映射，不受阈值影响
+        cases = {
+            "切线长": "切线长定理",
+            "托勒密": "托勒密定理",
+            "一线三等角": "相似进阶模型（一线三等角）",
+        }
+        for tag, expected in cases.items():
+            with self.subTest(tag=tag):
+                mapped = _map_tags_to_knowledge_points([tag], MATH_KNOWLEDGE_POINTS)
+                self.assertEqual(mapped, [expected])
+
+    def test_mixed_tags_keep_only_confident(self):
+        mapped = _map_tags_to_knowledge_points(
+            ["勾股定理", "认真计算", "射影定理"], MATH_KNOWLEDGE_POINTS
+        )
+        self.assertIn("勾股定理", mapped)
+        self.assertIn("射影定理", mapped)
+        self.assertNotIn("认真计算", mapped)
+
+
 if __name__ == "__main__":
     unittest.main()

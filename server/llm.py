@@ -81,6 +81,8 @@ MATH_KNOWLEDGE_POINTS = [
     "相似基础模型（8 字）",
     "相似基础模型（反 8 字）",
     "相似基础模型（角平分线）",
+    "相似基础模型（子母）",
+    "相似基础模型（K 字）",
     "射影定理",
     "相似进阶模型（一线三等角）",
     "相似进阶模型（旋转相似）",
@@ -486,11 +488,12 @@ MATH_MODELS = [
     "已知三角函数值和一条边，设未知边为 x，用三角函数列方程求解",
     "大直角三角形中包含小直角三角形，利用公共边建立等量关系",
     "sinA=cos(90°-A)，cosA=sin(90°-A)，tanA·tan(90°-A)=1",
-    "sin2A=2sinAcosA，cos2A=cos²A-sin²A=2cos²A-1=1-2sin²A",
-    "sin(A/2)=√((1-cosA)/2)，cos(A/2)=√((1+cosA)/2)",
-    "sin(A±B)=sinAcosB±cosAsinB，cos(A±B)=cosAcosB∓sinAsinB",
-    "两直线斜率分别为 k1、k2，夹角正切 tanθ=|(k2-k1)/(1+k1k2)|",
-    "二倍角公式（拓展）",
+    "二倍角公式：sin2A=2sinAcosA，cos2A=cos²A-sin²A=2cos²A-1=1-2sin²A，tan2A=2tanA/(1-tan²A)",
+    "二倍角公式变形：1+cos2A=2cos²A，1-cos2A=2sin²A，sinA=2sin(A/2)cos(A/2)",
+    "半角公式（A 为锐角时取正号）：sin(A/2)=√((1-cosA)/2)，cos(A/2)=√((1+cosA)/2)，tan(A/2)=sinA/(1+cosA)=(1-cosA)/sinA",
+    "和差角公式：sin(A±B)=sinAcosB±cosAsinB，cos(A±B)=cosAcosB∓sinAsinB，tan(A±B)=(tanA±tanB)/(1∓tanAtanB)",
+    "和差角公式用法：把非特殊角拆成特殊角之和或差，如 sin15°=sin(45°-30°)=sin45°cos30°-cos45°sin30°=(√6-√2)/4",
+    "两直线夹角公式：斜率分别为 k1、k2（1+k1k2≠0）时夹角正切 tanθ=|(k2-k1)/(1+k1k2)|；垂直则 k1·k2=-1，平行则 k1=k2",
     "存在 90 度角就导角",
     # ==========================================
     # 数学思想方法与通法
@@ -1525,20 +1528,32 @@ def _format_blacklist_for_prompt(blacklist: list[str]) -> str:
     ) + "\n\n"
 
 
+# 标签映射的最低置信度得分。低于该值说明标签与任何考点都只是零散字符重合
+# （如公式片段 "sin2A=2sinAcosA"、口语标签 "认真计算"），强行映射会得到
+# 完全无关的考点，因此直接丢弃该标签。
+# 参考量级：子串包含命中 >= 900；中文双字符片段命中每处 40；
+# 纯字母数字重合每处只有 3，噪声标签普遍 < 130。
+TAG_MAPPING_MIN_SCORE = 150
+
+
 def _map_tags_to_knowledge_points(
     tags: list[str], knowledge_points: list[str]
 ) -> list[str]:
     """将模型自由生成的标签映射回本地全量知识点库。
 
-    使用多维打分策略（完全匹配、子串包含、公共字集合、双字符重合度），
-    将 AI 生成的非标准标签自动对齐到学科标准知识点名称，保留高置信度匹配结果。
+    使用多维打分策略（完全匹配、子串包含、公共汉字集合、双字符重合度）
+    将 AI 生成的非标准标签对齐到学科标准知识点名称。中文字符承载主要语义，
+    因此汉字重合的权重远高于字母数字重合（公式里的 a、b、sin 等）。
+
+    只有得分达到 TAG_MAPPING_MIN_SCORE 的标签才会被采纳；置信度不足的标签
+    直接丢弃，避免把公式片段、口语描述强行映射成无关考点。
 
     Args:
         tags: AI 模型返回的标签字符串列表
         knowledge_points: 当前学科标准知识点库全量列表
 
     Returns:
-        list[str]: 映射对齐并去重后的标准标签列表
+        list[str]: 映射对齐并去重后的标准标签列表；考点库为空时原样返回入参
     """
     if not tags or not knowledge_points:
         return tags
@@ -1556,9 +1571,10 @@ def _map_tags_to_knowledge_points(
             continue
 
         best_score = -1
-        best_point = tag.strip()
-        # 提取标签中的有效字符集合（中文、字母、数字）
-        tag_chars = set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", normalized_tag))
+        best_point = ""
+        # 汉字与字母数字分开统计：前者是主要语义载体，后者多为公式符号
+        tag_han = set(re.findall(r"[\u4e00-\u9fff]", normalized_tag))
+        tag_alnum = set(re.findall(r"[A-Za-z0-9]", normalized_tag))
 
         # 遍历标准库考点，计算匹配得分
         for normalized_point, point in normalized_points:
@@ -1571,36 +1587,41 @@ def _map_tags_to_knowledge_points(
                 break
 
             score = 0
-            # 2. 前缀/子串包含加分
-            if normalized_tag in normalized_point:
+            # 2. 子串包含加分（限制最短长度，避免单个汉字把标签"碰瓷"到无关考点）
+            if len(normalized_tag) >= 2 and normalized_tag in normalized_point:
                 score += 1000 + len(normalized_tag)
-            if normalized_point in normalized_tag:
+            if len(normalized_point) >= 2 and normalized_point in normalized_tag:
                 score += 900 + len(normalized_point)
 
-            # 3. 共有字符加分
-            point_chars = set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", normalized_point))
-            shared_chars = len(tag_chars & point_chars)
-            score += shared_chars * 10
+            # 3. 共有字符加分：汉字每字 40 分，字母数字每字 3 分
+            point_han = set(re.findall(r"[\u4e00-\u9fff]", normalized_point))
+            point_alnum = set(re.findall(r"[A-Za-z0-9]", normalized_point))
+            score += len(tag_han & point_han) * 40
+            score += len(tag_alnum & point_alnum) * 3
 
-            # 4. 2-gram（相邻双字符）公共片段加分，有效衡量词序相似度
-            shared_bigrams = 0
+            # 4. 2-gram（相邻双字符）公共片段加分，有效衡量词序相似度；
+            #    含汉字的片段按汉字权重计，纯公式片段按低权重计
             for idx in range(len(normalized_tag) - 1):
                 bigram = normalized_tag[idx : idx + 2]
-                if bigram and bigram in normalized_point:
-                    shared_bigrams += 1
-            score += shared_bigrams * 25
+                if not bigram or bigram not in normalized_point:
+                    continue
+                score += 40 if re.search(r"[\u4e00-\u9fff]", bigram) else 3
 
             # 若当前得分刷新最高纪录，则记录该候选标准点
             if score > best_score:
                 best_score = score
                 best_point = point
 
+        # 置信度不足：说明只是零散字符重合，丢弃而不是硬映射到无关考点
+        if not best_point or best_score < TAG_MAPPING_MIN_SCORE:
+            logger.info(f"[LLM] 标签「{tag}」与考点库匹配置信度不足，已丢弃")
+            continue
+
         # 映射去重入库
         if best_point not in mapped:
             mapped.append(best_point)
 
-    # 若映射为空则返回原标签作为兜底
-    return mapped or tags
+    return mapped
 
 
 def build_analysis_prompt(
