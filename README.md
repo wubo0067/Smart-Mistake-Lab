@@ -959,7 +959,7 @@ uv run python -m unittest discover -s tests
 
 ## 📄 许可证
 
-当前仓库未包含 `LICENSE` 文件，因此 README 暂不声明具体许可证。若要以开源方式分发，请先在仓库中添加许可证文件并更新此处。
+本项目基于 [MIT License](./LICENSE) 开源发布，可自由使用、复制、修改、合并、发布、分发、再授权及/或销售软件副本。
 
 ## 📞 联系方式与反馈
 
