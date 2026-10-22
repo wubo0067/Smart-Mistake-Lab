@@ -3,7 +3,7 @@
 一款基于 **AI 视觉识别**的多学科错题管理工具。支持**数学、物理、化学、英语、语文**五大学科，通过自动化流程简化错题整理。一键扫描本地图片文件夹，AI 自动识别题目内容并按学科分类打标签，支持详细的解答编辑、灵活的学习追踪、超时督促提醒等功能。
 
 <div align="center">
-  <img src="./sml.gif" alt="Smart Mistake Lab 演示" width="700" />
+  <video src="./sml.mp4" width="700" autoplay loop muted playsinline controls></video>
 </div>
 
 **核心特色**：
