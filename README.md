@@ -1,5 +1,7 @@
 # 🎓 Smart Mistake Lab（智能错题本）
 
+🌐 [English](README.en.md) | [简体中文](README.md)
+
 一款基于 **AI 视觉识别**的多学科错题管理工具。支持**数学、物理、化学、英语、语文**五大学科，通过自动化流程简化错题整理。一键扫描本地图片文件夹，AI 自动识别题目内容并按学科分类打标签，支持详细的解答编辑、灵活的学习追踪、超时督促提醒等功能。
 
 <div align="center">
@@ -164,20 +166,58 @@ sida-agent 把初中**物理 / 化学 / 数学**教材 / 讲义 PDF 用视觉大
 
 ## 架构概览
 
-```
-图片目录（按学科分类）               前端 (React + Vite)              后端 (Python FastAPI)               存储层
-┌─────────────────┐              ┌──────────────────────┐        ┌──────────────────────────┐      ┌──────────┐
-│ 数学/            │              │  mistake-notebook    │  HTTP  │  server/server.py        │ SQL  │ SQLite   │
-│ 物理/            │   文件读取    │  .jsx                │◄──────►│  (port 8765)             │─────►│ 每人一库  │
-│ 化学/            │◄─────────────┤                      │ proxy  │  ┌────────────────────┐  │      │          │
-│ 英语/            │              │  （无 AI 逻辑）       │        │  │ llm.py (AI 交互)  │  │      │ 图片元数据│
-│ 语文/            │              │                      │        │  │ log.py (日志)      │  │      │ 配置信息  │
-│ 📄 未分类图片     │              │                      │        │  └────────────────────┘  │      └──────────┘
-└─────────────────┘              └──────────────────────┘        └──────────────────────────┘
+```mermaid
+graph TD
+    subgraph Frontend[前端层 - React & Vite]
+        UI[UI 组件: mistake-notebook.jsx]
+        State[状态管理: React Hooks]
+    end
+
+    subgraph API_Gateway[后端 API 层 - FastAPI]
+        API[API 路由: server.py]
+        Middleware[学生上下文中间件: StudentContextMiddleware]
+        Proxy[知识库代理: Sida-Agent Proxy]
+    end
+
+    subgraph Business_Logic[业务逻辑层 - Python]
+        DB_Layer[数据持久化: db.py]
+        LLM_Logic[AI 交互逻辑: llm.py]
+        Sim_Logic[相似度检索: similar.py]
+        Path_Logic[路径安全处理: path_resolver.py]
+    end
+
+    subgraph Data_Storage[数据存储层]
+        RegDB[(学生注册表: students.db)]
+        GlobalCfg[(全局配置: global_config)]
+        StudentDB[(学生专属库: data_s*.db)]
+        Images[题目图片资源库]
+    end
+
+    subgraph External_Services[外部服务]
+        LLM_API[LLM API: OpenAI/Anthropic/DeepSeek/Ollama]
+        SidaAgent[Sida-Agent 知识库服务]
+    end
+
+    UI <-->|HTTP/JSON| API
+    API --> Middleware
+    Middleware --> DB_Layer
+    API --> Proxy
+    API --> LLM_Logic
+    API --> Sim_Logic
+    API --> Path_Logic
+    DB_Layer --> RegDB
+    DB_Layer --> GlobalCfg
+    DB_Layer --> StudentDB
+    Path_Logic --> Images
+    LLM_Logic <-->|HTTP/JSON| LLM_API
+    Proxy <-->|HTTP/JSON| SidaAgent
 ```
 
 - **学科目录**：图片目录下的**一级子目录**自动识别为学科名，AI 分析时使用对应学科的知识点列表
-- **后端**：统一管理 AI 调用、学科专用 Prompt 构建、API 鉴权与日志
+- **后端 API 层**：FastAPI 路由处理请求；学生上下文中间件将数据请求路由到当前学生的独立数据库；知识库代理通过 HTTP/JSON 转发到 sida-agent
+- **业务逻辑层**：`db.py` 管理持久化，`llm.py` 管理 AI 调用与学科专用 Prompt，`similar.py` 执行相似题检索，`path_resolver.py` 处理图片路径
+- **外部服务**：**重要的学科知识库由 sida-agent 提供**，后端知识库代理通过 HTTP/JSON 连接 sida-agent，为学生提供教材知识问答、知识检索、页码溯源和教材原图查看；此外，`llm.py` 调用 OpenAI、Anthropic、DeepSeek、Ollama 等 LLM API，负责错题分析等 AI 能力
+- **数据存储层**：`students.db` 保存学生注册表和全局配置，`data_s*.db` 按学生隔离错题数据，图片资源保留在配置的图片目录
 - **前端**：只负责界面展示与用户交互，不含任何 AI 或 API Key 逻辑
 - **Vite 代理**：将 `/api` 请求转发到后端（开发环境免跨域）
 - **多学生路由**：`students.db` 只存学生名单；每个请求由中间件按 `X-Student-Id` 头（或 `?sid=` 参数）路由到对应学生的 SQLite 库，并发请求互不串库
