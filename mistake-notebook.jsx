@@ -596,6 +596,29 @@ const CSS = `
   font-size: 12px; color: var(--ink-soft); font-weight: 700;
   letter-spacing: .5px; margin-bottom: 6px; display: block;
 }
+/* 醒目标题徽标：掌握程度 / 难度评分 / 练习次数 / 解答 */
+.mnb .field-label-hl {
+  display: inline-flex; align-items: center; gap: 5px;
+  border-radius: 5px; padding: 3px 9px;
+  font-size: 12.5px; font-weight: 800; letter-spacing: .5px;
+  margin-bottom: 8px;
+  color: var(--hl-ink, #1F5F54);
+  background: var(--hl-bg, rgba(31, 95, 84, 0.09));
+  border: 1px solid var(--hl-line, rgba(31, 95, 84, 0.28));
+}
+.mnb .field-label-hl.hl-mastery { --hl-ink: #2A8B52; --hl-bg: rgba(46, 158, 91, 0.10); --hl-line: rgba(46, 158, 91, 0.32); }
+.mnb .field-label-hl.hl-difficulty { --hl-ink: #A96508; --hl-bg: rgba(217, 160, 19, 0.14); --hl-line: rgba(217, 160, 19, 0.38); }
+.mnb .field-label-hl.hl-practice { --hl-ink: #1F5F54; --hl-bg: rgba(31, 95, 84, 0.09); --hl-line: rgba(31, 95, 84, 0.28); }
+.mnb .field-label-hl.hl-solution { --hl-ink: #C74B4B; --hl-bg: rgba(199, 75, 75, 0.09); --hl-line: rgba(199, 75, 75, 0.30); }
+.mnb .field-label-hl.hl-tags { --hl-ink: #6B4E9B; --hl-bg: rgba(107, 78, 155, 0.10); --hl-line: rgba(107, 78, 155, 0.30); }
+/* 错题详情底部三栏：标题与内容高度统一对齐 */
+.mnb .meta-row {
+  display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 14px;
+}
+.mnb .meta-item { margin-bottom: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.mnb .meta-item-mastery { flex: 1 1 200px; }
+.mnb .meta-item-center { flex: 0 0 auto; align-items: center; }
+.mnb .meta-value { display: flex; align-items: center; gap: 8px; min-height: 36px; }
 .mnb input[type="text"], .mnb input[type="password"], .mnb textarea {
   width: 100%; border: none; border-bottom: 1.5px solid var(--grid);
   background: transparent; padding: 7px 2px;
@@ -1065,6 +1088,20 @@ const CSS = `
   padding: 2px 8px;
   margin-right: 8px;
   vertical-align: 1px;
+}
+.mnb .field-label-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.09);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 5px;
+  padding: 3px 9px;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  margin-bottom: 8px;
 }
 .mnb .timestamp-row {
   display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 14px;
@@ -5342,7 +5379,7 @@ export default function App() {
                           placeholder="题目的文字描述，方便以后搜索" />
                       </div>
                       <div className="field">
-                        <label className="field-label">AI 提取题目内容</label>
+                        <label className="field-label field-label-ai">✨ AI 提取题目内容</label>
                         <textarea rows={6} value={draft.content}
                           onChange={(e) => setDraft({ ...draft, content: e.target.value })}
                           placeholder="AI 从图片中提取的题目内容，可手动修正" />
@@ -5352,7 +5389,7 @@ export default function App() {
                         <StarRating value={draft.difficulty} onChange={(v) => setDraft({ ...draft, difficulty: v })} />
                       </div>
                       <div className="field">
-                        <label className="field-label">知识点标签（双击编辑，点击 × 删除）</label>
+                        <label className="field-label field-label-hl hl-tags">🏷️ 知识点标签（双击编辑，点击 × 删除）</label>
                         <div className="tag-list-vertical">
                           {draft.tags.map((t) => (
                             <div key={t} className="tag-row">
@@ -5765,7 +5802,7 @@ export default function App() {
                     </div>
                   )}
                   <div className="detail-tags">
-                    <label className="field-label">知识点标签</label>
+                                      <label className="field-label field-label-hl hl-tags">🏷️ 知识点标签</label>
                     <div className="tag-list-vertical">
                       {(detail.tags || []).map((t) => (
                         <div key={t} className="tag-row">
@@ -5816,7 +5853,7 @@ export default function App() {
                   )}
 
                   <div className="field" style={{ marginBottom: 14 }}>
-                    <label className="field-label">AI 提取题目内容</label>
+                    <label className="field-label field-label-ai">✨ AI 提取题目内容</label>
                     {/* 非受控：值存在 ref，打字不触发 App 重渲染（防抖动）；key 按题重挂载以载入新题内容 */}
                     <textarea key={`content-${detail.file_path}`} ref={detailContentTextareaRef} rows={6}
                       defaultValue={detailContentRef.current}
@@ -5836,7 +5873,7 @@ export default function App() {
                   </div>
 
                   <div className="field solution-section">
-                    <label className="field-label">解答</label>
+                                      <label className="field-label field-label-hl hl-solution">📝 解答</label>
                     <textarea
                       key={`solution-${detail.file_path}`}
                       ref={solutionTextareaRef}
@@ -5872,10 +5909,10 @@ export default function App() {
                   </div>
 
                   {/* 掌握程度 + 练习计数 */}
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
-                    <div className="field" style={{ flex: '1 1 200px', marginBottom: 0 }}>
-                      <label className="field-label">掌握程度</label>
-                      <div className="mastery-group">
+                                    <div className="meta-row">
+                                      <div className="field meta-item meta-item-mastery">
+                                        <label className="field-label field-label-hl hl-mastery">🎯 掌握程度</label>
+                                        <div className="meta-value mastery-group">
                         {['mastered', 'unfamiliar', 'practice'].map((val) => (
                           <label key={val} className={'mastery-option' + (detailMastery === val ? ' active' : '')}>
                             <input type="radio" name="mastery" value={val}
@@ -5888,18 +5925,20 @@ export default function App() {
                         ))}
                       </div>
                     </div>
-                    <div className="field">
-                      <label className="field-label">难度评分</label>
-                      <StarRating value={detailDifficulty} onChange={setDetailDifficulty} />
-                    </div>
-                    <div className="field" style={{ flex: '0 0 auto', marginBottom: 0, textAlign: 'center' }}>
-                      <label className="field-label">练习次数</label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="practice-count">{detailPracticeCount}</span>
-                        <button className="practice-btn" onClick={incrementPractice} title="练习 +1">+1</button>
-                      </div>
-                    </div>
-                  </div>
+                                      <div className="field meta-item">
+                                        <label className="field-label field-label-hl hl-difficulty">⭐ 难度评分</label>
+                                        <div className="meta-value">
+                                          <StarRating value={detailDifficulty} onChange={setDetailDifficulty} />
+                                        </div>
+                                      </div>
+                                      <div className="field meta-item meta-item-center">
+                                        <label className="field-label field-label-hl hl-practice">🔁 练习次数</label>
+                                        <div className="meta-value">
+                                          <span className="practice-count">{detailPracticeCount}</span>
+                                          <button className="practice-btn" onClick={incrementPractice} title="练习 +1">+1</button>
+                                        </div>
+                                      </div>
+                                    </div>
 
                   {detailError && <div className="save-msg error" style={{ marginTop: -10, marginBottom: 12 }}>{detailError}</div>}
                   {detailSaving && <div className="save-msg" style={{ marginTop: -10, marginBottom: 12 }}>保存中…</div>}
