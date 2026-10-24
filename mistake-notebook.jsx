@@ -611,6 +611,7 @@ const CSS = `
 .mnb .field-label-hl.hl-practice { --hl-ink: #1F5F54; --hl-bg: rgba(31, 95, 84, 0.09); --hl-line: rgba(31, 95, 84, 0.28); }
 .mnb .field-label-hl.hl-solution { --hl-ink: #C74B4B; --hl-bg: rgba(199, 75, 75, 0.09); --hl-line: rgba(199, 75, 75, 0.30); }
 .mnb .field-label-hl.hl-tags { --hl-ink: #6B4E9B; --hl-bg: rgba(107, 78, 155, 0.10); --hl-line: rgba(107, 78, 155, 0.30); }
+.mnb .field-label-hl.hl-title { --hl-ink: #315E9E; --hl-bg: rgba(49, 94, 158, 0.09); --hl-line: rgba(49, 94, 158, 0.28); }
 /* 错题详情底部三栏：标题与内容高度统一对齐 */
 .mnb .meta-row {
   display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 14px;
@@ -5367,7 +5368,7 @@ export default function App() {
                   {draft && (
                     <div style={{ flex: '1 1 280px' }}>
                       <div className="field">
-                        <label className="field-label">题目标题</label>
+                        <label className="field-label field-label-hl hl-title">📝 题目标题</label>
                         <input type="text" value={draft.title}
                           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
                           placeholder="例如：相似三角形与中位线综合题" />
@@ -5385,7 +5386,7 @@ export default function App() {
                           placeholder="AI 从图片中提取的题目内容，可手动修正" />
                       </div>
                       <div className="field">
-                        <label className="field-label">难度评分</label>
+                        <label className="field-label field-label-hl hl-difficulty">⭐ 难度评分</label>
                         <StarRating value={draft.difficulty} onChange={(v) => setDraft({ ...draft, difficulty: v })} />
                       </div>
                       <div className="field">
