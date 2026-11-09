@@ -82,9 +82,20 @@ class TestMathChemistryKnowledgeModelSplit(unittest.TestCase):
             "托勒密定理",
             "阿基米德折弦定理",
             "西姆松定理",
+            "张角定理",
+            "中线长定理",
         ):
             with self.subTest(point=name):
                 self.assertIn(name, MATH_KNOWLEDGE_POINTS)
+
+    def test_triangle_theorem_models_are_available(self):
+        self.assertTrue(
+            any("梅涅劳斯定理" in model for model in MATH_MODELS)
+        )
+        self.assertTrue(any("塞瓦定理" in model for model in MATH_MODELS))
+        self.assertTrue(any("中位线" in model for model in MATH_MODELS))
+        self.assertTrue(any("张角定理：" in model for model in MATH_MODELS))
+        self.assertTrue(any("中线长定理：" in model for model in MATH_MODELS))
 
     def test_math_config_registers_models(self):
         cfg = SUBJECT_CONFIG["数学"]
